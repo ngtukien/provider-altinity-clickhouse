@@ -112,7 +112,7 @@ func TestValidateKeeper(t *testing.T) {
 	assert.NoError(t, validate(t, withKeeper(newReplicatedTestInstance(""), keeperReplicas(3))))
 	assert.ErrorContains(t, validate(t, withKeeper(newReplicatedTestInstance(""), keeperReplicas(5))), "cannot be changed")
 	assert.ErrorContains(t, validate(t, withKeeper(newTestInstance("db", "ns", ""), func(*corev1alpha1.ComponentSpec) {})),
-		"only used by the replicated topology")
+		"only used by the replicated and sharded topologies")
 }
 
 func TestValidateKeeperTransitions(t *testing.T) {

@@ -33,6 +33,7 @@ import (
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	"github.com/openeverest/provider-altinity-clickhouse/definition/components"
+	"github.com/openeverest/provider-altinity-clickhouse/definition/topologies/sharded"
 	"github.com/openeverest/provider-altinity-clickhouse/internal/common"
 )
 
@@ -70,6 +71,10 @@ func (p *Provider) Validate(c *controller.Context) error {
 		}
 	}
 
+	if err := validateShards(c); err != nil {
+		return err
+	}
+
 	var params components.ClickHouseParameters
 	_ = c.TryDecodeComponentParameters(engine, &params)
 	switch {
@@ -90,10 +95,9 @@ func (p *Provider) Validate(c *controller.Context) error {
 		}
 	}
 
-	if c.Instance().GetTopologyType() != common.TopologyReplicated &&
-		engine.Replicas != nil && *engine.Replicas > 1 {
-		return fmt.Errorf("the %s topology runs a single replica; use the %s topology for more",
-			common.TopologyStandalone, common.TopologyReplicated)
+	if !usesKeeper(c) && engine.Replicas != nil && *engine.Replicas > 1 {
+		return fmt.Errorf("the %s topology runs a single replica; use the %s or %s topology for more",
+			common.TopologyStandalone, common.TopologyReplicated, common.TopologySharded)
 	}
 
 	if err := validateConfiguration(params.Configuration); err != nil {
@@ -172,9 +176,9 @@ func validateKeeper(c *controller.Context) error {
 	if !ok {
 		return nil
 	}
-	if c.Instance().GetTopologyType() != common.TopologyReplicated {
-		return fmt.Errorf("the %s component is only used by the %s topology",
-			common.ComponentKeeper, common.TopologyReplicated)
+	if !usesKeeper(c) {
+		return fmt.Errorf("the %s component is only used by the %s and %s topologies",
+			common.ComponentKeeper, common.TopologyReplicated, common.TopologySharded)
 	}
 	if keeper.Replicas != nil && *keeper.Replicas != common.KeeperReplicas {
 		return fmt.Errorf("keeper runs %d replicas; its size cannot be changed", common.KeeperReplicas)
@@ -186,7 +190,7 @@ func validateKeeper(c *controller.Context) error {
 // take: shrinking or moving its volumes, or downgrading it. The Keeper exists
 // before ClickHouse does, so it is checked on its own.
 func validateKeeperTransitions(c *controller.Context) error {
-	if c.Instance().GetTopologyType() != common.TopologyReplicated {
+	if !usesKeeper(c) {
 		return nil
 	}
 	chk := &chkv1.ClickHouseKeeperInstallation{}
@@ -306,7 +310,7 @@ func validateTransitions(c *controller.Context, engine corev1alpha1.ComponentSpe
 		return fmt.Errorf("read current ClickHouseInstallation: %w", err)
 	}
 
-	if c.Instance().GetTopologyType() != common.TopologyReplicated {
+	if !usesKeeper(c) {
 		replicated, err := isReplicated(c, chi)
 		if err != nil {
 			return err
@@ -315,6 +319,10 @@ func validateTransitions(c *controller.Context, engine corev1alpha1.ComponentSpe
 			return fmt.Errorf("the topology cannot be changed from %s to %s",
 				common.TopologyReplicated, common.TopologyStandalone)
 		}
+	}
+
+	if err := validateShardTransition(c, chi); err != nil {
+		return err
 	}
 
 	if err := validateStorageTransition(c, chi, engine); err != nil {
@@ -487,4 +495,41 @@ func compareSegments(a, b *goversion.Version) int {
 		}
 	}
 	return 0
+}
+
+// validateShards checks the sharded topology's shard count, and that no other
+// topology carries a shards parameter it would ignore.
+func validateShards(c *controller.Context) error {
+	var params sharded.ShardedTopologyParameters
+	hasParams := c.TryDecodeTopologyParameters(&params)
+	if !isSharded(c) {
+		if hasParams && params.Shards != 0 {
+			return fmt.Errorf("shards is only used by the %s topology", common.TopologySharded)
+		}
+		return nil
+	}
+	if hasParams && params.Shards != 0 && params.Shards < 2 {
+		return fmt.Errorf("the %s topology requires at least 2 shards", common.TopologySharded)
+	}
+	engine := c.Instance().Spec.Components[common.ComponentEngine]
+	if engine.Replicas != nil && *engine.Replicas < 1 {
+		return fmt.Errorf("the %s topology requires at least 1 replica per shard", common.TopologySharded)
+	}
+	return nil
+}
+
+// validateShardTransition rejects switching an existing cluster into or out
+// of the sharded topology, and removing shards: the data on a removed shard
+// would be lost, and ClickHouse does not move data between shards.
+func validateShardTransition(c *controller.Context, chi *chiv1.ClickHouseInstallation) error {
+	live := liveShardsCount(chi)
+	switch {
+	case isSharded(c) && live == 1:
+		return fmt.Errorf("the topology cannot be changed to %s; create a new instance instead", common.TopologySharded)
+	case !isSharded(c) && live > 1:
+		return fmt.Errorf("the topology cannot be changed from %s", common.TopologySharded)
+	case isSharded(c) && shardsCount(c) < live:
+		return fmt.Errorf("shards cannot be decreased from %d to %d", live, shardsCount(c))
+	}
+	return nil
 }
