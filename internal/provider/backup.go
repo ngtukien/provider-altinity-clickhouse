@@ -133,7 +133,7 @@ func (p *Provider) SyncBackup(c *controller.Context, backup *backupv1alpha1.Back
 	}
 
 	if backup.Spec.ScheduleName != "" {
-		return controller.BackupExecutionStatus{State: backup.Status.State}, nil
+		return syncScheduledBackup(c, backup)
 	}
 
 	exists, err := c.Exists(&chiv1.ClickHouseBackup{}, backup.Name)
