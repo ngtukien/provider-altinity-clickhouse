@@ -505,7 +505,9 @@ When `spec.backup` is enabled, the provider configures the underlying infrastruc
   (restricted to `localhost` connections only) and stores its credentials in Secret
   `<instance>-auto-backup-secret`.
 - **Network isolation**: A NetworkPolicy `<instance>-backup-api` restricts access to the
-  sidecar REST API (port 7171) so that only backup Jobs and the operator can reach it.
+  sidecar REST API (port 7171) so that only pods labelled
+  `clickhouse.altinity.com/backup-chi: <instance>` (the operator's backup Jobs and the
+  provider's delete Job) can reach it. The operator itself is not allowed.
 
 ### On-demand backups
 
@@ -550,9 +552,10 @@ The provider creates an operator `ClickHouseBackupSchedule` named `<instance>-<s
 - **Count retention only**: Only count-based retention (`retention.type: count`, matching the
   operator's `keepLast`) is supported. Time-based retention (`retention.type: time`) is
   rejected during validation.
-- **Pruning**: The operator automatically prunes remote backup archives according to `count`.
-  The provider monitors the storage and deletes the OpenEverest `Backup` CRs corresponding to
-  pruned runs.
+- **Pruning**: The provider does not look at the storage. After each successful scheduled run
+  it deletes the oldest `Succeeded` Backup CRs of that schedule beyond `count`, after switching
+  them to `deletionPolicy: Retain` (the operator already removed their data). The two counts can
+  differ, because the operator's `keepLast` ignores runs that hold no data.
 
 ### Backup deletion
 
@@ -580,13 +583,13 @@ custom resource directly against the target cluster.
 - **Cross-shard consistency**: ClickHouse backups are performed per node and do not form a
   globally consistent snapshot across shards. For sharded clusters, point-in-time consistency
   across shards must be managed at the application level (e.g. pausing ingestion during backup).
-- **Operator 0.28.0 schedule bug**: The provider chart's default setting
-  `watch.namespaces.include: [".*"]` triggers a bug in upstream Altinity operator 0.28.0 that
-  breaks `ClickHouseBackupSchedule` reconciliation. This is fixed in the custom fork operator
-  image used by the chart. When deploying with upstream operator images, list target
-  namespaces explicitly instead of using wildcard `".*"`.
-- **Pod QoS / Resource requests**: The operator injects the `clickhouse-backup` sidecar without
-  default resource requests unless configured on the operator pod template. A ClickHouse pod
+- **Operator 0.28.0 schedule bug**: The chart's default operator image is upstream
+  `altinity/clickhouse-operator:0.28.0`, which has a bug where `watch.namespaces.include: [".*"]`
+  breaks `ClickHouseBackupSchedule` reconciliation. With the upstream image, set
+  `operator.configs.files.config.yaml.watch.namespaces.include` to explicit namespace names.
+  The fix exists only in the dbaas fork of the operator (branch `release-0.28.0-dbaas`,
+  where `newCacheNamespaces` returns nil for watch-all); with the fork image the default `[".*"]` works.
+- **Pod QoS / Resource requests**: The provider sets no resources on the sidecar. A ClickHouse pod
   with `Guaranteed` Quality of Service (QoS) may therefore downgrade to `Burstable` once the
   sidecar is added.
 - **Single storage only**: Only one `BackupStorage` can be configured per Instance (`maxStorages: 1`).

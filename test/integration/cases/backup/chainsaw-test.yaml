@@ -8,7 +8,7 @@ spec:
     standalone ClickHouse Instance with backup enabled, assert the
     BackupConfigured condition and the clickhouse-backup sidecar container.
     Then run an on-demand Backup, assert it succeeds, delete the Backup and
-    assert the delete Job completes.
+    assert it is removed from remote storage.
   catch:
     - script:
         content: kubectl -n $NAMESPACE get instance,chi,backup,backupstorage,deployment,job,pod -o wide
@@ -44,14 +44,13 @@ spec:
             content: |
               set -eu
               kubectl delete backup/itest-ch-backup-ondemand -n "$NAMESPACE" --wait=false
-              for i in $(seq 1 30); do
-                if kubectl get job/itest-ch-backup-ondemand-delete -n "$NAMESPACE" >/dev/null 2>&1; then
-                  break
-                fi
-                sleep 1
-              done
-              kubectl wait --for=condition=Complete job/itest-ch-backup-ondemand-delete -n "$NAMESPACE" --timeout=180s
-              kubectl wait --for=delete backup/itest-ch-backup-ondemand -n "$NAMESPACE" --timeout=60s
+              kubectl wait --for=delete backup/itest-ch-backup-ondemand -n "$NAMESPACE" --timeout=180s
+              out=$(kubectl exec -n "$NAMESPACE" chi-itest-ch-backup-clickhouse-0-0-0 -c clickhouse-backup -- clickhouse-backup list remote)
+              if echo "$out" | grep -q "itest-ch-backup-ondemand"; then
+                echo "expected backup itest-ch-backup-ondemand to be absent from remote list, but found it in:" >&2
+                echo "$out" >&2
+                exit 1
+              fi
       finally:
         - command:
             entrypoint: kubectl
