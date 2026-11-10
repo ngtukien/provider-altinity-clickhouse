@@ -45,12 +45,17 @@ spec:
               set -eu
               kubectl delete backup/itest-ch-backup-ondemand -n "$NAMESPACE" --wait=false
               kubectl wait --for=delete backup/itest-ch-backup-ondemand -n "$NAMESPACE" --timeout=180s
-              out=$(kubectl exec -n "$NAMESPACE" chi-itest-ch-backup-clickhouse-0-0-0 -c clickhouse-backup -- clickhouse-backup list remote)
-              if echo "$out" | grep -q "itest-ch-backup-ondemand"; then
-                echo "expected backup itest-ch-backup-ondemand to be absent from remote list, but found it in:" >&2
-                echo "$out" >&2
-                exit 1
-              fi
+              # The sidecar deletes asynchronously after acknowledging the request.
+              for i in $(seq 1 12); do
+                out=$(kubectl exec -n "$NAMESPACE" chi-itest-ch-backup-clickhouse-0-0-0 -c clickhouse-backup -- clickhouse-backup list remote)
+                if ! echo "$out" | grep -q "itest-ch-backup-ondemand"; then
+                  exit 0
+                fi
+                sleep 5
+              done
+              echo "expected backup itest-ch-backup-ondemand to be absent from remote list, but found it in:" >&2
+              echo "$out" >&2
+              exit 1
       finally:
         - command:
             entrypoint: kubectl
