@@ -36,6 +36,10 @@ import (
 	"github.com/openeverest/provider-altinity-clickhouse/internal/common"
 )
 
+// backupDeletionScript asks each shard's sidecar to delete the remote backup.
+// shortcut: the sidecar API is asynchronous, so a 2xx reply only means the deletion was accepted
+// and a failure inside clickhouse-backup is not reported back; poll /backup/actions for the
+// operation result if silent leftovers in the storage turn out to matter.
 const backupDeletionScript = `set -euo pipefail
 
 : "${BACKUP_NAME:?BACKUP_NAME must be set}"
@@ -69,7 +73,7 @@ for host in ${HOSTS}; do
     echo "Delete remote backup ${BACKUP_NAME} on ${host} failed (HTTP ${http_code}): ${http_body}" >&2
     exit 1
   done
-  echo "${host}: remote backup ${BACKUP_NAME} deleted"
+  echo "${host}: deletion of remote backup ${BACKUP_NAME} acknowledged"
 done
 `
 
