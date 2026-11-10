@@ -289,6 +289,12 @@ func TestAutoBackupSecret_CreatedWhenAbsent(t *testing.T) {
 	require.NotNil(t, autoSecret)
 	assert.Equal(t, BackupUsername, string(autoSecret.Data[BackupSecretKeyUsername]))
 	assert.Len(t, autoSecret.Data[BackupSecretKeyPassword], 2*common.AppUserPasswordBytes)
+
+	owner := metav1.GetControllerOf(autoSecret)
+	require.NotNil(t, owner, "auto-backup-secret must have a controller owner reference")
+	assert.Equal(t, instance.Name, owner.Name)
+	assert.Equal(t, "Instance", owner.Kind)
+	assert.True(t, *owner.Controller)
 }
 
 func TestBackupAPINetworkPolicy(t *testing.T) {
@@ -360,6 +366,10 @@ func TestInputsHash_BackupChanges(t *testing.T) {
 	instDisabled := withBackup(newTestInstance("db", "ns", ""), false, corev1alpha1.InstanceBackupStorage{
 		StorageRef: commonv1alpha1.ObjectRef{Name: "s3-storage-1"},
 	})
+	instEnabledNoStorage := newTestInstance("db", "ns", "")
+	instEnabledNoStorage.Spec.Backup = &corev1alpha1.InstanceBackupSpec{
+		Enabled: true,
+	}
 	instEnabled1 := withBackup(newTestInstance("db", "ns", ""), true, corev1alpha1.InstanceBackupStorage{
 		StorageRef: commonv1alpha1.ObjectRef{Name: "s3-storage-1"},
 	})
@@ -379,6 +389,10 @@ func TestInputsHash_BackupChanges(t *testing.T) {
 	hashDisabled, err := inputsHash(newTestContext(t, instDisabled))
 	require.NoError(t, err)
 	assert.Equal(t, hashNil, hashDisabled, "disabled backup hash equals nil backup hash")
+
+	hashNoStorage, err := inputsHash(newTestContext(t, instEnabledNoStorage))
+	require.NoError(t, err)
+	assert.Equal(t, hashNil, hashNoStorage, "enabled with no storage gives the same hash as spec.backup nil")
 
 	hashEnabled1, err := inputsHash(newTestContext(t, instEnabled1))
 	require.NoError(t, err)

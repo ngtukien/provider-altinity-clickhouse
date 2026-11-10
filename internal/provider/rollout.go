@@ -214,14 +214,10 @@ func inputsHash(c *controller.Context) (string, error) {
 		credentials = userCredentialsRevision(secret)
 	}
 	var backup *backupInputs
-	if spec.Backup != nil && spec.Backup.Enabled {
-		storage := ""
-		if len(spec.Backup.Storages) > 0 {
-			storage = spec.Backup.Storages[0].StorageRef.Name
-		}
+	if instanceBackupEnabled(spec.Backup) {
 		backup = &backupInputs{
-			Enabled: spec.Backup.Enabled,
-			Storage: storage,
+			Enabled: true,
+			Storage: spec.Backup.Storages[0].StorageRef.Name,
 		}
 	}
 	return hashJSON(struct {

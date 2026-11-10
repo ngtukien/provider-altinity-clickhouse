@@ -19,8 +19,10 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/yaml"
 
+	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
 	"github.com/openeverest/provider-altinity-clickhouse/internal/common"
@@ -40,11 +42,16 @@ const (
 	BackupSecretKeyPassword = "CLICKHOUSE_PASSWORD"
 )
 
+// instanceBackupEnabled reports whether backup is configured in the spec:
+// non-nil, Enabled is true, and at least one storage is declared.
+func instanceBackupEnabled(b *corev1alpha1.InstanceBackupSpec) bool {
+	return b != nil && b.Enabled && len(b.Storages) > 0
+}
+
 // backupEnabled reports whether operator-managed backup is configured for the Instance:
 // spec.backup is non-nil, Enabled is true, and at least one storage is declared.
 func backupEnabled(c *controller.Context) bool {
-	b := c.Instance().Spec.Backup
-	return b != nil && b.Enabled && len(b.Storages) > 0
+	return instanceBackupEnabled(c.Instance().Spec.Backup)
 }
 
 // backupStorageSecretName returns the name of the Secret holding the
@@ -184,6 +191,9 @@ func ensureBackupInfra(c *controller.Context) error {
 				BackupSecretKeyUsername: []byte(BackupUsername),
 				BackupSecretKeyPassword: []byte(password),
 			},
+		}
+		if err := controllerutil.SetControllerReference(c.Instance(), newSecret, c.Client().Scheme()); err != nil {
+			return fmt.Errorf("set controller reference on auto backup secret %s: %w", autoSecretName, err)
 		}
 		if err := c.Client().Create(c.Context(), newSecret); err != nil {
 			return fmt.Errorf("create auto backup secret %s: %w", autoSecretName, err)
