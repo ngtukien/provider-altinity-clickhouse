@@ -26,6 +26,7 @@ import (
 	chtypes "github.com/altinity/clickhouse-operator/pkg/apis/common/types"
 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -70,6 +71,7 @@ func New() *Provider {
 				cmapi.AddToScheme,
 				networkingv1.AddToScheme,
 				storagev1.AddToScheme,
+				batchv1.AddToScheme,
 			},
 			// Safe to watch: server-side apply of an unchanged CHI/CHK is a
 			// no-op, so operator status/finalizer writes do not loop back.
@@ -175,6 +177,10 @@ func (p *Provider) sync(c *controller.Context) error {
 	// operator can resolve the referenced Secret on first apply.
 	if _, err := ensureCredentials(c); err != nil {
 		return fmt.Errorf("ensure credentials: %w", err)
+	}
+
+	if err := ensureBackupInfra(c); err != nil {
+		return err
 	}
 
 	// Provision TLS certificates before creating the CHI so the operator can
@@ -634,6 +640,15 @@ func buildCHIWired(c *controller.Context, replicasCount int, keeper keeperWiring
 	// ReplicatedMergeTree need it.
 	if replicasCount > 1 || isSharded(c) {
 		spec.Configuration.Zookeeper = keeperZookeeper(c, keeper.port)
+	}
+
+	if backupEnabled(c) {
+		spec.Backup = &chiv1.ClusterBackup{
+			Enabled: chtypes.NewStringBool(true),
+			ConfigSecretRef: &corev1.LocalObjectReference{
+				Name: backupStorageSecretName(c.Name()),
+			},
+		}
 	}
 
 	return &chiv1.ClickHouseInstallation{
