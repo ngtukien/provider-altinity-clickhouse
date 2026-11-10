@@ -26,6 +26,7 @@ import (
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,6 +41,7 @@ func newBackupTestContext(t *testing.T, instance *corev1alpha1.Instance, objs ..
 	scheme := runtime.NewScheme()
 	require.NoError(t, corev1alpha1.AddToScheme(scheme))
 	require.NoError(t, corev1.AddToScheme(scheme))
+	require.NoError(t, batchv1.AddToScheme(scheme))
 	require.NoError(t, backupv1alpha1.AddToScheme(scheme))
 	require.NoError(t, chiv1.AddToScheme(scheme))
 
@@ -477,7 +479,16 @@ func TestSyncBackup_EdgeCases(t *testing.T) {
 				State: backupv1alpha1.BackupStateRunning,
 			},
 		}
-		c := newBackupTestContext(t, instance, chi, backup)
+		job := &batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "scheduled-backup",
+				Namespace: ns,
+			},
+			Status: batchv1.JobStatus{
+				Active: 1,
+			},
+		}
+		c := newBackupTestContext(t, instance, chi, backup, job)
 		status, err := p.SyncBackup(c, backup)
 		require.NoError(t, err)
 		assert.Equal(t, backupv1alpha1.BackupStateRunning, status.State)
