@@ -250,6 +250,27 @@ func (p *Provider) CleanupBackup(c *controller.Context, backup *backupv1alpha1.B
 	l := log.FromContext(c.Context())
 	l.Info("Cleaning up backup", "name", backup.Name)
 
+	if backup.Namespace == "" {
+		backup.Namespace = c.Namespace()
+	}
+
+	if shouldDeleteBackupData(backup) {
+		done, missingInstance, err := p.deleteBackupData(c, backup)
+		if err != nil {
+			return false, err
+		}
+		if missingInstance {
+			chb := &chiv1.ClickHouseBackup{}
+			if getErr := c.Get(chb, backup.Name); getErr == nil && chb.DeletionTimestamp.IsZero() {
+				_ = c.Delete(chb)
+			}
+			return true, nil
+		}
+		if !done {
+			return false, nil
+		}
+	}
+
 	chb := &chiv1.ClickHouseBackup{}
 	if err := c.Get(chb, backup.Name); err != nil {
 		if apierrors.IsNotFound(err) {
