@@ -126,6 +126,9 @@ func (p *Provider) Validate(c *controller.Context) error {
 	if err := validateKeeperTransitions(c); err != nil {
 		return err
 	}
+	if err := validateBackupSchedules(c.Instance().Spec.Backup, c.Name()); err != nil {
+		return err
+	}
 	return validateTransitions(c, engine)
 }
 

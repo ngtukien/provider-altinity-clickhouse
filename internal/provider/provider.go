@@ -78,6 +78,7 @@ func New() *Provider {
 			WatchConfigs: []controller.WatchConfig{
 				controller.WatchOwned(&chiv1.ClickHouseInstallation{}),
 				controller.WatchOwned(&chkv1.ClickHouseKeeperInstallation{}),
+				controller.WatchOwned(&chiv1.ClickHouseBackupSchedule{}),
 				// The credentials Secret, so editing a password rotates it. Only
 				// this provider's Secrets: other providers' Instances own Secrets
 				// too, and the runtime would reconcile those Instances here.
@@ -205,7 +206,10 @@ func (p *Provider) sync(c *controller.Context) error {
 	if err := reconcilePodMonitor(c); err != nil {
 		return err
 	}
-	return syncErr
+	if syncErr != nil {
+		return syncErr
+	}
+	return syncBackupSchedules(c)
 }
 
 // syncStandalone applies and waits on the CHI for a single-node deployment.
