@@ -505,8 +505,48 @@ func TestSyncBackup_EdgeCases(t *testing.T) {
 			},
 		}
 		c := newBackupTestContext(t, instance, chi, backup)
-		_, err := p.SyncBackup(c, backup)
-		assert.Error(t, err)
+		status, err := p.SyncBackup(c, backup)
+		require.NoError(t, err)
+		assert.Equal(t, backupv1alpha1.BackupStateFailed, status.State)
+		assert.Contains(t, status.Message, "invalid backup parameters")
+
+		chb := &chiv1.ClickHouseBackup{}
+		err = c.Client().Get(context.Background(), client.ObjectKey{Namespace: ns, Name: backup.Name}, chb)
+		assert.True(t, apierrors.IsNotFound(err))
+	})
+
+	t.Run("Invalid replicaSelection parameter", func(t *testing.T) {
+		chi := &chiv1.ClickHouseInstallation{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      instName,
+				Namespace: ns,
+			},
+		}
+		backup := &backupv1alpha1.Backup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "invalid-replica-sel",
+				Namespace: ns,
+			},
+			Spec: backupv1alpha1.BackupSpec{
+				StorageRef: commonv1alpha1.ObjectRef{
+					Name: "s3-storage",
+				},
+				Parameters: &runtime.RawExtension{
+					Raw: []byte(`{"replicaSelection":"InvalidMode"}`),
+				},
+			},
+		}
+		c := newBackupTestContext(t, instance, chi, backup)
+		status, err := p.SyncBackup(c, backup)
+		require.NoError(t, err)
+		assert.Equal(t, backupv1alpha1.BackupStateFailed, status.State)
+		assert.Contains(t, status.Message, `invalid replicaSelection "InvalidMode"`)
+		assert.Contains(t, status.Message, string(chiv1.ReplicaSelectionFirstPerShard))
+		assert.Contains(t, status.Message, string(chiv1.ReplicaSelectionAllReplicas))
+
+		chb := &chiv1.ClickHouseBackup{}
+		err = c.Client().Get(context.Background(), client.ObjectKey{Namespace: ns, Name: backup.Name}, chb)
+		assert.True(t, apierrors.IsNotFound(err))
 	})
 
 	t.Run("BackupWatches", func(t *testing.T) {

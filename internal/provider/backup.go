@@ -168,7 +168,19 @@ func (p *Provider) SyncBackup(c *controller.Context, backup *backupv1alpha1.Back
 
 	params, err := decodeBackupParameters(backup.Spec.Parameters)
 	if err != nil {
-		return controller.BackupExecutionStatus{}, err
+		return controller.BackupExecutionStatus{
+			State:   backupv1alpha1.BackupStateFailed,
+			Message: err.Error(),
+		}, nil
+	}
+	if params.ReplicaSelection != "" &&
+		params.ReplicaSelection != string(chiv1.ReplicaSelectionFirstPerShard) &&
+		params.ReplicaSelection != string(chiv1.ReplicaSelectionAllReplicas) {
+		return controller.BackupExecutionStatus{
+			State: backupv1alpha1.BackupStateFailed,
+			Message: fmt.Sprintf("invalid replicaSelection %q: allowed values are %q and %q",
+				params.ReplicaSelection, chiv1.ReplicaSelectionFirstPerShard, chiv1.ReplicaSelectionAllReplicas),
+		}, nil
 	}
 
 	chb := &chiv1.ClickHouseBackup{
