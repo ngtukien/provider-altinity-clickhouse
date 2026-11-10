@@ -29,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -155,6 +156,10 @@ func findClickHouseBackupImage(ctx context.Context, cl client.Client, namespace,
 	return "", nil
 }
 
+// backupDeletionNonRootUID is the distroless nonroot user/group ID (65532) used
+// so the backup deletion Job satisfies the Kubernetes Pod Security Standard "restricted".
+const backupDeletionNonRootUID = int64(65532)
+
 // buildBackupDeletionJob constructs the one-shot batchv1.Job for remote backup data deletion.
 func buildBackupDeletionJob(
 	backup *backupv1alpha1.Backup,
@@ -220,12 +225,27 @@ func buildBackupDeletionJob(
 				Spec: corev1.PodSpec{
 					RestartPolicy:                corev1.RestartPolicyNever,
 					AutomountServiceAccountToken: &automount,
+					SecurityContext: &corev1.PodSecurityContext{
+						RunAsNonRoot: ptr.To(true),
+						RunAsUser:    ptr.To(backupDeletionNonRootUID),
+						RunAsGroup:   ptr.To(backupDeletionNonRootUID),
+						SeccompProfile: &corev1.SeccompProfile{
+							Type: corev1.SeccompProfileTypeRuntimeDefault,
+						},
+					},
 					Containers: []corev1.Container{
 						{
 							Name:    "backup-delete",
 							Image:   image,
 							Command: []string{"bash", "-c", backupDeletionScript},
 							Env:     env,
+							SecurityContext: &corev1.SecurityContext{
+								AllowPrivilegeEscalation: ptr.To(false),
+								ReadOnlyRootFilesystem:   ptr.To(true),
+								Capabilities: &corev1.Capabilities{
+									Drop: []corev1.Capability{"ALL"},
+								},
+							},
 						},
 					},
 				},

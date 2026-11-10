@@ -181,10 +181,32 @@ func TestCleanupBackup_DeleteSucceededTwoShards(t *testing.T) {
 	require.NotNil(t, job.Spec.ActiveDeadlineSeconds)
 	assert.Equal(t, int64(1800), *job.Spec.ActiveDeadlineSeconds)
 
+	// Pod security context for Pod Security Standard restricted
+	podSec := job.Spec.Template.Spec.SecurityContext
+	require.NotNil(t, podSec, "Pod SecurityContext must be set")
+	require.NotNil(t, podSec.RunAsNonRoot)
+	assert.True(t, *podSec.RunAsNonRoot)
+	require.NotNil(t, podSec.RunAsUser)
+	assert.Equal(t, int64(65532), *podSec.RunAsUser)
+	require.NotNil(t, podSec.RunAsGroup)
+	assert.Equal(t, int64(65532), *podSec.RunAsGroup)
+	require.NotNil(t, podSec.SeccompProfile)
+	assert.Equal(t, corev1.SeccompProfileTypeRuntimeDefault, podSec.SeccompProfile.Type)
+
 	// Container check
 	require.Len(t, job.Spec.Template.Spec.Containers, 1)
 	container := job.Spec.Template.Spec.Containers[0]
 	assert.Equal(t, "altinity/clickhouse-backup:2.6.0", container.Image)
+
+	// Container security context for Pod Security Standard restricted
+	cntSec := container.SecurityContext
+	require.NotNil(t, cntSec, "Container SecurityContext must be set")
+	require.NotNil(t, cntSec.AllowPrivilegeEscalation)
+	assert.False(t, *cntSec.AllowPrivilegeEscalation)
+	require.NotNil(t, cntSec.ReadOnlyRootFilesystem)
+	assert.True(t, *cntSec.ReadOnlyRootFilesystem)
+	require.NotNil(t, cntSec.Capabilities)
+	assert.Equal(t, []corev1.Capability{"ALL"}, cntSec.Capabilities.Drop)
 
 	// Check environment variables
 	var hostsEnv, userEnv, passEnv *corev1.EnvVar
@@ -672,3 +694,46 @@ func TestBackupDeletionScript_BashSyntax(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "bash -n failed: %s", string(out))
 }
+
+func TestBuildBackupDeletionJob_PodSecurityStandardRestricted(t *testing.T) {
+	backup := &backupv1alpha1.Backup{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "daily-backup",
+			Namespace: "db-ns",
+		},
+	}
+	chi := &chiv1.ClickHouseInstallation{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-chi",
+			Namespace: "db-ns",
+		},
+	}
+	job, err := buildBackupDeletionJob(backup, "my-chi", chi, "altinity/clickhouse-backup:2.6.0")
+	require.NoError(t, err)
+	require.NotNil(t, job)
+
+	// Pod securityContext assertions
+	podSec := job.Spec.Template.Spec.SecurityContext
+	require.NotNil(t, podSec, "Pod SecurityContext must be configured")
+	require.NotNil(t, podSec.RunAsNonRoot, "runAsNonRoot must be set")
+	assert.True(t, *podSec.RunAsNonRoot, "runAsNonRoot must be true")
+	require.NotNil(t, podSec.RunAsUser, "runAsUser must be set")
+	assert.Equal(t, int64(65532), *podSec.RunAsUser, "runAsUser must be 65532")
+	require.NotNil(t, podSec.RunAsGroup, "runAsGroup must be set")
+	assert.Equal(t, int64(65532), *podSec.RunAsGroup, "runAsGroup must be 65532")
+	require.NotNil(t, podSec.SeccompProfile, "seccompProfile must be set")
+	assert.Equal(t, corev1.SeccompProfileTypeRuntimeDefault, podSec.SeccompProfile.Type, "seccompProfile.type must be RuntimeDefault")
+
+	// Container securityContext assertions
+	require.Len(t, job.Spec.Template.Spec.Containers, 1)
+	container := job.Spec.Template.Spec.Containers[0]
+	cntSec := container.SecurityContext
+	require.NotNil(t, cntSec, "Container SecurityContext must be configured")
+	require.NotNil(t, cntSec.AllowPrivilegeEscalation, "allowPrivilegeEscalation must be set")
+	assert.False(t, *cntSec.AllowPrivilegeEscalation, "allowPrivilegeEscalation must be false")
+	require.NotNil(t, cntSec.ReadOnlyRootFilesystem, "readOnlyRootFilesystem must be set")
+	assert.True(t, *cntSec.ReadOnlyRootFilesystem, "readOnlyRootFilesystem must be true")
+	require.NotNil(t, cntSec.Capabilities, "capabilities must be set")
+	assert.Equal(t, []corev1.Capability{"ALL"}, cntSec.Capabilities.Drop, "capabilities.drop must contain ALL")
+}
+
