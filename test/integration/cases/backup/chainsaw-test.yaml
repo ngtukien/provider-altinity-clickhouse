@@ -1,0 +1,104 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: backup
+spec:
+  description: |
+    Install MinIO as an S3 object store, configure a BackupStorage and a
+    standalone ClickHouse Instance with backup enabled, assert the
+    BackupConfigured condition and the clickhouse-backup sidecar container.
+    Then run an on-demand Backup, assert it succeeds, delete the Backup and
+    assert the delete Job completes.
+  catch:
+    - script:
+        content: kubectl -n $NAMESPACE get instance,chi,backup,backupstorage,deployment,job,pod -o wide
+    - script:
+        content: kubectl logs -n default -l app.kubernetes.io/name=provider-altinity-clickhouse --tail=100
+  steps:
+    - name: setup-minio
+      try:
+        - apply:
+            file: 00-minio.yaml
+        - script:
+            timeout: 120s
+            content: |
+              set -eu
+              kubectl wait --for=condition=Available deployment/minio -n "$NAMESPACE" --timeout=90s
+              kubectl wait --for=condition=Complete job/minio-create-bucket -n "$NAMESPACE" --timeout=90s
+    - name: create-instance
+      try:
+        - apply:
+            file: 10-create-instance.yaml
+        - assert:
+            file: 10-assert.yaml
+    - name: on-demand-backup
+      try:
+        - apply:
+            file: 20-create-backup.yaml
+        - assert:
+            file: 20-assert-backup.yaml
+    - name: delete-backup
+      try:
+        - script:
+            timeout: 300s
+            content: |
+              set -eu
+              kubectl delete backup/itest-ch-backup-ondemand -n "$NAMESPACE" --wait=false
+              for i in $(seq 1 30); do
+                if kubectl get job/itest-ch-backup-ondemand-delete -n "$NAMESPACE" >/dev/null 2>&1; then
+                  break
+                fi
+                sleep 1
+              done
+              kubectl wait --for=condition=Complete job/itest-ch-backup-ondemand-delete -n "$NAMESPACE" --timeout=180s
+              kubectl wait --for=delete backup/itest-ch-backup-ondemand -n "$NAMESPACE" --timeout=60s
+      finally:
+        - command:
+            entrypoint: kubectl
+            args:
+              - delete
+              - backups.backup.openeverest.io
+              - itest-ch-backup-ondemand
+              - -n
+              - default
+              - --ignore-not-found
+        - command:
+            entrypoint: kubectl
+            args:
+              - delete
+              - instances.core.openeverest.io
+              - itest-ch-backup
+              - -n
+              - default
+              - --ignore-not-found
+              - --wait=false
+        - command:
+            entrypoint: kubectl
+            args:
+              - delete
+              - pvc
+              - -n
+              - default
+              - -l
+              - clickhouse.altinity.com/chi=itest-ch-backup
+              - --ignore-not-found
+              - --wait=false
+        - command:
+            entrypoint: kubectl
+            args:
+              - delete
+              - backupstorages.backup.openeverest.io
+              - itest-backup-storage
+              - -n
+              - default
+              - --ignore-not-found
+        - command:
+            entrypoint: kubectl
+            args:
+              - delete
+              - deployment,service,job,secret
+              - -l
+              - app=minio
+              - -n
+              - default
+              - --ignore-not-found
