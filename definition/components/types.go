@@ -47,6 +47,22 @@ type ClickHouseParameters struct {
 	// are re-attached when an Instance with the same name is created in the same
 	// namespace.
 	StorageReclaimPolicy string `json:"storageReclaimPolicy,omitempty"`
+	// ColdStorage adds an S3 disk and a storage policy "tiered" (volumes "hot"
+	// on the data volume, "cold" on S3) for tables that opt in with
+	// `SETTINGS storage_policy = 'tiered'` and move old data with
+	// `TTL ... TO VOLUME 'cold'`. The default policy is unchanged.
+	ColdStorage *ColdStorageParameters `json:"coldStorage,omitempty"`
+}
+
+// ColdStorageParameters configures the S3 tier of the "tiered" storage policy.
+type ColdStorageParameters struct {
+	// StorageRef names a BackupStorage (backup.openeverest.io) in the
+	// Instance's namespace whose S3 bucket, endpoint and credentials hold the
+	// cold data, under <namespace>/<instance>/cold/.
+	StorageRef string `json:"storageRef"`
+	// CachePercent is the share of the engine's storage size used as a local
+	// read cache for cold data, from 1 to 50. Default 10.
+	CachePercent int `json:"cachePercent,omitempty"`
 }
 
 // TLSParameters configures TLS for client connections to ClickHouse.

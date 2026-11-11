@@ -77,6 +77,7 @@ Stateful workloads additionally report:
 | Storage expansion | ✅ | when the StorageClass allows volume expansion; growing volumes on one that does not is rejected |
 | Backups (on demand) | ✅ | operator-native (`executionMode: ProviderManaged`) via `clickhouse-backup`; one backup storage per Instance; see [Backups](#backups) |
 | Backups (scheduled) | ✅ | `spec.backup.storages[].schedules` → `ClickHouseBackupSchedule`; count retention only; see [Backups](#backups) |
+| Tiered storage (hot/cold) | ✅ | opt-in `tiered` storage policy: data volume (hot) + S3 disk with local cache (cold) from a `BackupStorage`; see [Tiered storage](#tiered-storage-hotcold) |
 | Point-in-time recovery | ❌ | planned |
 | Restore | ❌ | planned |
 
@@ -205,6 +206,43 @@ Watch it come up, then read the connection details from the Secret named by
 kubectl get instance my-instance -w
 kubectl get secret my-instance-conn -o jsonpath='{.data.uri}' | base64 -d
 ```
+
+### Tiered storage (hot/cold)
+
+Keep recent data on the data volume and move old parts to S3-compatible object
+storage. Point `coldStorage` at a `BackupStorage` (its bucket, endpoint, region and
+credentials Secret are reused; cold data goes under `<namespace>/<instance>/cold/`):
+
+```yaml
+spec:
+  components:
+    engine:
+      parameters:
+        coldStorage:
+          storageRef: clickhouse-cold   # BackupStorage in the Instance's namespace
+          cachePercent: 10              # local read cache, % of the engine storage size (1–50)
+```
+
+The provider adds an S3 disk, a local cache disk in front of it and a storage policy
+`tiered` (volumes `hot` on the data volume, `cold` on S3). The default policy does not
+change: tables opt in, and a TTL moves their old parts:
+
+```sql
+CREATE TABLE events (ts DateTime, payload String)
+ENGINE = MergeTree ORDER BY ts
+TTL ts + INTERVAL 30 DAY TO VOLUME 'cold'
+SETTINGS storage_policy = 'tiered';
+```
+
+- Credentials reach ClickHouse as environment variables from the BackupStorage's
+  Secret; they are not written into the configuration.
+- Every replica keeps its own copy of the cold parts (zero-copy replication is off),
+  so S3 holds one copy per replica.
+- Backups include cold parts: clickhouse-backup copies them under `object_disks/` in
+  the backup bucket.
+- Deleting the Instance does not delete the cold data in S3.
+- `verifyTLS: false` on the BackupStorage is not applied to the cold disk; use an
+  endpoint with a trusted certificate.
 
 ## Connecting
 
