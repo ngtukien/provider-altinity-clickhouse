@@ -126,6 +126,10 @@ func applyColdStorage(settings *chiv1.Settings, bs *backupv1alpha1.BackupStorage
 	policy := "storage_configuration/policies/" + tieredPolicy + "/volumes/"
 	settings.Set(policy+"hot/disk", chiv1.NewSettingScalar("default"))
 	settings.Set(policy+"cold/disk", chiv1.NewSettingScalar(coldCacheDisk))
+	// New parts go to the first volume. The operator renders keys sorted, which
+	// puts cold before hot, so order the volumes explicitly.
+	settings.Set(policy+"hot/volume_priority", chiv1.NewSettingScalar("1"))
+	settings.Set(policy+"cold/volume_priority", chiv1.NewSettingScalar("2"))
 	return nil
 }
 

@@ -62,6 +62,8 @@ func TestBuildCHIColdStoragePathStyle(t *testing.T) {
 
 	assert.Equal(t, "default", s.Get("storage_configuration/policies/tiered/volumes/hot/disk").String())
 	assert.Equal(t, "s3_cold_cache", s.Get("storage_configuration/policies/tiered/volumes/cold/disk").String())
+	assert.Equal(t, "1", s.Get("storage_configuration/policies/tiered/volumes/hot/volume_priority").String(), "new parts go to hot")
+	assert.Equal(t, "2", s.Get("storage_configuration/policies/tiered/volumes/cold/volume_priority").String())
 	assert.Nil(t, s.Get("storage_configuration/policies/default"), "the default policy is unchanged")
 }
 
