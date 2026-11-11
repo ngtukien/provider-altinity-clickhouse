@@ -57,6 +57,7 @@ func TestBuildCHIColdStoragePathStyle(t *testing.T) {
 	cache := "storage_configuration/disks/s3_cold_cache/"
 	assert.Equal(t, "cache", s.Get(cache+"type").String())
 	assert.Equal(t, "s3_cold", s.Get(cache+"disk").String())
+	assert.Equal(t, "/var/lib/clickhouse/s3_cold_cache/", s.Get(cache+"path").String(), "outside disks/, which the entrypoint would leave root-owned")
 	assert.Equal(t, "1073741824", s.Get(cache+"max_size").String(), "10% of 10Gi")
 
 	assert.Equal(t, "default", s.Get("storage_configuration/policies/tiered/volumes/hot/disk").String())

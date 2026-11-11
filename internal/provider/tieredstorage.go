@@ -34,6 +34,7 @@ import (
 const (
 	coldDisk            = "s3_cold"
 	coldCacheDisk       = "s3_cold_cache"
+	coldCachePath       = "/var/lib/clickhouse/" + coldCacheDisk + "/"
 	tieredPolicy        = "tiered"
 	defaultCachePercent = 10
 	// objectDiskPath is where clickhouse-backup copies the parts of S3 disks,
@@ -116,7 +117,10 @@ func applyColdStorage(settings *chiv1.Settings, bs *backupv1alpha1.BackupStorage
 	cache := "storage_configuration/disks/" + coldCacheDisk + "/"
 	settings.Set(cache+"type", chiv1.NewSettingScalar("cache"))
 	settings.Set(cache+"disk", chiv1.NewSettingScalar(coldDisk))
-	settings.Set(cache+"path", chiv1.NewSettingScalar("/var/lib/clickhouse/disks/"+coldCacheDisk+"/"))
+	// Not under disks/: the image entrypoint creates the cache path as root and
+	// chowns only the leaf, leaving disks/ root-owned so ClickHouse cannot create
+	// the S3 disk's metadata directory there and crashes on start.
+	settings.Set(cache+"path", chiv1.NewSettingScalar(coldCachePath))
 	settings.Set(cache+"max_size", chiv1.NewSettingScalar(strconv.FormatInt(storageSize.Value()*int64(percent)/100, 10)))
 
 	policy := "storage_configuration/policies/" + tieredPolicy + "/volumes/"
