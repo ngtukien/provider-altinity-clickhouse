@@ -222,6 +222,34 @@ func TestValidate(t *testing.T) {
 			want:    []string{"spec.components[engine].parameters.configuration"},
 		},
 		{
+			name:    "query limits within the memory budget",
+			fixture: standaloneFixture,
+			mutate:  engineParameters(`{"queryLimits":{"serverMemoryPercent":90,"maxMemoryUsage":"1Gi","maxExecutionTime":600,"spillToDisk":"Disabled"}}`),
+		},
+		{
+			name:    "query limits out of range",
+			fixture: standaloneFixture,
+			mutate:  engineParameters(`{"queryLimits":{"serverMemoryPercent":99,"maxExecutionTime":-1,"readonlyMaxExecutionTime":-5,"spillToDisk":"sometimes"}}`),
+			want: []string{
+				"spec.components[engine].parameters.queryLimits.serverMemoryPercent",
+				"spec.components[engine].parameters.queryLimits.maxExecutionTime",
+				"spec.components[engine].parameters.queryLimits.readonlyMaxExecutionTime",
+				"spec.components[engine].parameters.queryLimits.spillToDisk",
+			},
+		},
+		{
+			name:    "per-query memory above the server budget",
+			fixture: standaloneFixture,
+			mutate:  engineParameters(`{"queryLimits":{"maxMemoryUsage":"64Gi"}}`),
+			want:    []string{"spec.components[engine].parameters.queryLimits.maxMemoryUsage"},
+		},
+		{
+			name:    "per-query memory not a quantity",
+			fixture: standaloneFixture,
+			mutate:  engineParameters(`{"queryLimits":{"maxMemoryUsage":"lots"}}`),
+			want:    []string{"spec.components[engine].parameters.queryLimits.maxMemoryUsage"},
+		},
+		{
 			name:    "unknown engine parameter",
 			fixture: standaloneFixture,
 			mutate:  engineParameters(`{"podmonitor":"enabled"}`),
