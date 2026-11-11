@@ -44,6 +44,17 @@ Provisions a standalone (single-replica) Instance and asserts:
   `Updating` while the pod rolls, then `Ready` again with the CHI at the new
   limit.
 
+### `ready-pods`
+
+Guards the Instance status against a ClickHouse pod that never starts:
+
+1. A sharded Instance (2 shards, 250m CPU request) becomes `Ready` with both
+   ClickHouse pods Ready.
+2. Raising the engine CPU request to 1900m leaves a rolled pod `Pending` on the
+   lab's 2-CPU nodes; while any pod is Pending the Instance must not report
+   `Ready` (the provider says `Waiting for ClickHouse pods: x of y ready`).
+3. Lowering the request again brings the Instance back to `Ready`.
+
 ### `replicated`
 
 Provisions a replicated (2-replica) Instance and asserts:

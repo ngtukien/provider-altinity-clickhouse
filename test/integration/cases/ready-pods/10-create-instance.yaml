@@ -1,0 +1,29 @@
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: itest-ch-rp
+  namespace: default
+spec:
+  providerRef:
+    name: altinity-clickhouse
+  topology:
+    type: sharded
+    parameters:
+      shards: 2
+  components:
+    engine:
+      type: clickhouse
+      replicas: 1
+      resources:
+        # The lab has 6 worker CPUs; a small request leaves room for both shards.
+        requests:
+          cpu: 250m
+        limits:
+          cpu: "1"
+          memory: 2G
+      storage:
+        size: 10Gi
+    keeper:
+      type: clickhouse-keeper
+      storage:
+        size: 5Gi
