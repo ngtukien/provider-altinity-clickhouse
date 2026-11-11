@@ -620,6 +620,11 @@ func buildCHIWired(c *controller.Context, replicasCount int, keeper keeperWiring
 		},
 	}
 
+	var params components.ClickHouseParameters
+	_ = c.TryDecodeComponentParameters(engine, &params)
+	spec.Configuration.Profiles = applyQueryLimits(settings,
+		resolveQueryLimits(params.QueryLimits, resources.Limits[corev1.ResourceMemory]))
+
 	if settings != nil {
 		spec.Configuration.Settings = settings
 	}

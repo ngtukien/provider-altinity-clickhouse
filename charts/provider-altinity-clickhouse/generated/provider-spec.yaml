@@ -54,6 +54,41 @@ spec:
                 pods. The native metrics endpoint is always exposed; this only controls
                 whether the operator manages a PodMonitor. One of "enabled" or "disabled".
               type: string
+            queryLimits:
+              description: |-
+                QueryLimits caps the memory and time queries may use, so a heavy query
+                fails with MEMORY_LIMIT_EXCEEDED or TIMEOUT_EXCEEDED instead of the pod
+                being OOM-killed. Applied with defaults when omitted.
+              properties:
+                maxExecutionTime:
+                  description: |-
+                    MaxExecutionTime cancels queries of the default profile running longer
+                    than this many seconds (max_execution_time). Default 0, no limit, so
+                    long ETL and INSERT ... SELECT keep working.
+                  type: integer
+                maxMemoryUsage:
+                  description: |-
+                    MaxMemoryUsage caps the memory of one query (max_memory_usage), as a
+                    Kubernetes quantity such as "2Gi". Default half the engine's memory
+                    limit; must not exceed the server memory budget.
+                  type: string
+                readonlyMaxExecutionTime:
+                  description: |-
+                    ReadonlyMaxExecutionTime is max_execution_time of the readonly profile,
+                    in seconds. Default 300.
+                  type: integer
+                serverMemoryPercent:
+                  description: |-
+                    ServerMemoryPercent is the share of the engine's memory limit all queries
+                    together may use (max_server_memory_usage), from 10 to 95. Default 80;
+                    the rest is left to memory ClickHouse does not track.
+                  type: integer
+                spillToDisk:
+                  description: |-
+                    SpillToDisk lets GROUP BY and ORDER BY write to disk once they use half
+                    of MaxMemoryUsage instead of failing. One of "enabled" (default) or "disabled".
+                  type: string
+              type: object
             storageReclaimPolicy:
               description: |-
                 StorageReclaimPolicy controls what happens to the data volumes (ClickHouse

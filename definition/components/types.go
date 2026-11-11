@@ -47,6 +47,34 @@ type ClickHouseParameters struct {
 	// are re-attached when an Instance with the same name is created in the same
 	// namespace.
 	StorageReclaimPolicy string `json:"storageReclaimPolicy,omitempty"`
+	// QueryLimits caps the memory and time queries may use, so a heavy query
+	// fails with MEMORY_LIMIT_EXCEEDED or TIMEOUT_EXCEEDED instead of the pod
+	// being OOM-killed. Applied with defaults when omitted.
+	QueryLimits *QueryLimitsParameters `json:"queryLimits,omitempty"`
+}
+
+// QueryLimitsParameters configures the server memory budget and the settings
+// profiles: "default" (the application user and SQL-created users without a
+// profile) and "readonly" (for BI users: `CREATE USER bi ... SETTINGS PROFILE 'readonly'`).
+type QueryLimitsParameters struct {
+	// ServerMemoryPercent is the share of the engine's memory limit all queries
+	// together may use (max_server_memory_usage), from 10 to 95. Default 80;
+	// the rest is left to memory ClickHouse does not track.
+	ServerMemoryPercent int `json:"serverMemoryPercent,omitempty"`
+	// MaxMemoryUsage caps the memory of one query (max_memory_usage), as a
+	// Kubernetes quantity such as "2Gi". Default half the engine's memory
+	// limit; must not exceed the server memory budget.
+	MaxMemoryUsage string `json:"maxMemoryUsage,omitempty"`
+	// MaxExecutionTime cancels queries of the default profile running longer
+	// than this many seconds (max_execution_time). Default 0, no limit, so
+	// long ETL and INSERT ... SELECT keep working.
+	MaxExecutionTime int `json:"maxExecutionTime,omitempty"`
+	// ReadonlyMaxExecutionTime is max_execution_time of the readonly profile,
+	// in seconds. Default 300.
+	ReadonlyMaxExecutionTime int `json:"readonlyMaxExecutionTime,omitempty"`
+	// SpillToDisk lets GROUP BY and ORDER BY write to disk once they use half
+	// of MaxMemoryUsage instead of failing. One of "enabled" (default) or "disabled".
+	SpillToDisk string `json:"spillToDisk,omitempty"`
 }
 
 // TLSParameters configures TLS for client connections to ClickHouse.

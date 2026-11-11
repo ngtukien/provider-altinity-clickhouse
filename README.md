@@ -64,6 +64,7 @@ provider itself is covered under [Upgrading the provider](#upgrading-the-provide
 | Vertical scaling (CPU / memory) | ✅ | `spec.components.engine.resources` limits and requests; see [Resources](#resources) |
 | Version upgrades | ✅ | change `spec.version` to a newer bundle; downgrades are rejected; see [Upgrading ClickHouse](#upgrading-clickhouse) |
 | Custom configuration | ✅ | ClickHouse server settings via the engine component's `configuration` parameter |
+| Query limits (OOM protection) | ✅ | server memory budget and per-query limits derived from the memory limit, spill to disk, `readonly` profile for BI users; see [Query limits](#query-limits-oom-protection) |
 | Monitoring | ✅ | native Prometheus metrics endpoint always exposed; optional `PodMonitor` via the engine component's `podMonitor` parameter |
 | Authentication | ✅ | an administrative user, seeded from `spec.userSecretRef` or generated, with password rotation; `default` user and replica-to-replica traffic authenticated (see [Connecting](#connecting)) |
 | TLS | ✅ | opt-in per Instance via the engine component's `tls` parameters; client connections over TLS only by default, distributed queries between replicas over TLS; requires [cert-manager](#prerequisites) |
@@ -205,6 +206,49 @@ Watch it come up, then read the connection details from the Secret named by
 kubectl get instance my-instance -w
 kubectl get secret my-instance-conn -o jsonpath='{.data.uri}' | base64 -d
 ```
+
+### Query limits (OOM protection)
+
+A single unbounded `GROUP BY` or `JOIN` can fill the pod's memory in seconds, and
+the kernel then OOM-kills ClickHouse. The provider derives limits from the engine's
+memory limit, so a heavy query fails with `MEMORY_LIMIT_EXCEEDED` (code 241) and the
+pod keeps running:
+
+| Setting | Default | Where |
+|---|---|---|
+| `max_server_memory_usage` | 80% of the memory limit | server; all queries, merges and caches together |
+| `max_memory_usage` | 50% of the memory limit | per query, profiles `default` and `readonly` |
+| `max_bytes_before_external_group_by`, `max_bytes_before_external_sort` | half of `max_memory_usage` | `GROUP BY` and `ORDER BY` spill to disk instead of failing |
+| `max_execution_time` | none (`default`), 300 s (`readonly`) | seconds a query may run |
+
+Two settings profiles are defined:
+
+- `default`, used by the administrative user and by SQL-created users without a
+  profile. No time limit, so long ETL and `INSERT … SELECT` keep working.
+- `readonly`, for BI and reporting users: `readonly = 2` (reads only; BI drivers may
+  still send `SET` on connect, which `readonly = 1` refuses), and constraints keep
+  these users from raising their own `max_memory_usage` or `max_execution_time`.
+
+```sql
+CREATE USER bi IDENTIFIED BY '…' SETTINGS PROFILE 'readonly';
+GRANT SELECT ON analytics.* TO bi;
+```
+
+Tune them under `spec.components.engine.parameters.queryLimits`:
+
+```yaml
+queryLimits:
+  serverMemoryPercent: 80          # 10–95
+  maxMemoryUsage: 2Gi              # at most the server budget
+  maxExecutionTime: 0              # default profile, 0 = no limit
+  readonlyMaxExecutionTime: 300    # readonly profile
+  spillToDisk: enabled             # or disabled
+```
+
+A `max_server_memory_usage` or `max_server_memory_usage_to_ram_ratio` set in the
+engine `configuration` takes precedence over `serverMemoryPercent`. A `JOIN` whose
+hash table exceeds `max_memory_usage` is cancelled, not spilled; use
+`SETTINGS join_algorithm = 'grace_hash'` (or `'auto'`) for such joins.
 
 ## Connecting
 
