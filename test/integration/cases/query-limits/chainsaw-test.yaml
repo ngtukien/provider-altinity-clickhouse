@@ -99,7 +99,9 @@ spec:
               . ./lib.sh
               BIPW=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
               admin "CREATE TABLE IF NOT EXISTS default.itest_ql (id UInt64) ENGINE = MergeTree ORDER BY id"
-              admin "CREATE OR REPLACE USER itest_bi IDENTIFIED WITH sha256_password BY '$BIPW' SETTINGS PROFILE 'readonly'"
+              admin "DROP USER IF EXISTS itest_bi"
+              # ClickHouse 26.8 has no CREATE OR REPLACE USER.
+              admin "CREATE USER itest_bi IDENTIFIED WITH sha256_password BY '$BIPW' SETTINGS PROFILE 'readonly'"
               admin "GRANT SELECT ON *.* TO itest_bi"
               # INSERT is granted, so only readonly=2 can refuse it.
               admin "GRANT INSERT ON default.itest_ql TO itest_bi"
