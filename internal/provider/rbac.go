@@ -72,9 +72,11 @@ package provider
 // +kubebuilder:rbac:groups=backup.openeverest.io,resources=restores/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=backup.openeverest.io,resources=restores/finalizers,verbs=update
 
-// Altinity ClickHouseBackup and ClickHouseBackupSchedule
+// Altinity ClickHouseBackup, ClickHouseBackupSchedule and ClickHouseRestore
 // +kubebuilder:rbac:groups=clickhouse.altinity.com,resources=clickhousebackups,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=clickhouse.altinity.com,resources=clickhousebackups/status,verbs=get
+// +kubebuilder:rbac:groups=clickhouse.altinity.com,resources=clickhouserestores,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=clickhouse.altinity.com,resources=clickhouserestores/status,verbs=get
 // +kubebuilder:rbac:groups=clickhouse.altinity.com,resources=clickhousebackupschedules,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=clickhouse.altinity.com,resources=clickhousebackupschedules/status,verbs=get
 

@@ -137,6 +137,7 @@
     - clickhousebackups
     - clickhousebackupschedules
     - clickhouseinstallations
+    - clickhouserestores
   verbs:
     - create
     - delete
@@ -151,6 +152,7 @@
     - clickhousebackups/status
     - clickhousebackupschedules/status
     - clickhouseinstallations/status
+    - clickhouserestores/status
   verbs:
     - get
 - apiGroups:

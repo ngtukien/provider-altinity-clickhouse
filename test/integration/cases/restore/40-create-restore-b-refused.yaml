@@ -1,0 +1,13 @@
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Restore
+metadata:
+  name: itest-ch-restore-b-refused
+  namespace: default
+spec:
+  instanceRef:
+    name: itest-ch-restore
+  dataSource:
+    type: Backup
+    backup:
+      backupRef:
+        name: itest-ch-restore-backup-a

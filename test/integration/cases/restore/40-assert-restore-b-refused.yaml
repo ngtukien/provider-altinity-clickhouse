@@ -1,0 +1,7 @@
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Restore
+metadata:
+  name: itest-ch-restore-b-refused
+  namespace: default
+status:
+  state: Failed

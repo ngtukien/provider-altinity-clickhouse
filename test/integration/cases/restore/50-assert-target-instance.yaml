@@ -1,0 +1,17 @@
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: itest-ch-restore-target
+  namespace: default
+status:
+  phase: Ready
+  (conditions[?type == 'BackupConfigured']):
+    - status: "True"
+---
+apiVersion: clickhouse.altinity.com/v1
+kind: ClickHouseInstallation
+metadata:
+  name: itest-ch-restore-target
+  namespace: default
+status:
+  status: Completed

@@ -3,6 +3,8 @@
 
 parametersSchema:
     openAPIV3Schema: AltinityClickhouseBackupConfig
+restoreParametersSchema:
+    openAPIV3Schema: AltinityClickhouseRestoreConfig
 description: ClickHouse backups via the Altinity operator's clickhouse-backup sidecar to S3-compatible storage.
 displayName: ClickHouse Backup (clickhouse-backup)
 executionMode: ProviderManaged

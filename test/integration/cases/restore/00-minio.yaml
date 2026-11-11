@@ -1,0 +1,183 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: itest-ch-restore-backup-credentials
+  namespace: default
+  labels:
+    app: itest-ch-restore-minio
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: minioadmin
+  AWS_SECRET_ACCESS_KEY: minioadmin
+---
+apiVersion: backup.openeverest.io/v1alpha1
+kind: BackupStorage
+metadata:
+  name: itest-ch-restore-backup-storage
+  namespace: default
+  labels:
+    app: itest-ch-restore-minio
+spec:
+  type: s3
+  s3:
+    bucket: clickhouse-backups
+    region: us-east-1
+    endpointURL: http://itest-ch-restore-minio:9000
+    forcePathStyle: true
+    verifyTLS: false
+    credentialsSecretRef:
+      name: itest-ch-restore-backup-credentials
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: itest-ch-restore-minio
+  namespace: default
+  labels:
+    app: itest-ch-restore-minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: itest-ch-restore-minio
+  template:
+    metadata:
+      labels:
+        app: itest-ch-restore-minio
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: seaweedfs
+          image: chrislusf/seaweedfs:3.80
+          args:
+            - server
+            - -dir=/data
+            - -s3
+            - -s3.port=9000
+            - -volume.max=0
+            - -master.volumeSizeLimitMB=64
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: s3
+              containerPort: 9000
+          readinessProbe:
+            tcpSocket:
+              port: 9000
+            initialDelaySeconds: 2
+            periodSeconds: 2
+            failureThreshold: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: itest-ch-restore-minio
+  namespace: default
+  labels:
+    app: itest-ch-restore-minio
+spec:
+  selector:
+    app: itest-ch-restore-minio
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: 9000
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: itest-ch-restore-minio-create-bucket
+  namespace: default
+  labels:
+    app: itest-ch-restore-minio
+spec:
+  template:
+    metadata:
+      labels:
+        app: itest-ch-restore-minio
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: create-bucket
+          image: amazon/aws-cli:2.22.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: HOME
+              value: /tmp
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+            - name: AWS_REGION
+              value: us-east-1
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: itest-ch-restore-backup-credentials
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: itest-ch-restore-backup-credentials
+                  key: AWS_SECRET_ACCESS_KEY
+          command:
+            - /bin/sh
+            - -c
+            - |
+              ENDPOINT="http://itest-ch-restore-minio:9000"
+              BUCKET="clickhouse-backups"
+              for i in $(seq 1 30); do
+                echo "Attempt $i: creating bucket s3://$BUCKET at $ENDPOINT..."
+                if out=$(aws --endpoint-url "$ENDPOINT" s3 mb "s3://$BUCKET" 2>&1); then
+                  echo "$out"
+                  echo "Bucket $BUCKET created successfully"
+                  exit 0
+                fi
+                if aws --endpoint-url "$ENDPOINT" s3 ls "s3://$BUCKET" >/dev/null 2>&1; then
+                  echo "Bucket $BUCKET already exists"
+                  exit 0
+                fi
+                echo "aws s3 mb failed: $out"
+                echo "Waiting for S3 endpoint..."
+                sleep 2
+              done
+              echo "Timed out waiting for S3 endpoint $ENDPOINT" >&2
+              exit 1
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+  backoffLimit: 10

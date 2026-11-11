@@ -1,0 +1,25 @@
+apiVersion: clickhouse-keeper.altinity.com/v1
+kind: ClickHouseKeeperInstallation
+metadata:
+  name: itest-ch-restore-sharded-keeper
+  namespace: default
+status:
+  status: Completed
+---
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: itest-ch-restore-sharded
+  namespace: default
+status:
+  phase: Ready
+  (conditions[?type == 'BackupConfigured']):
+    - status: "True"
+---
+apiVersion: clickhouse.altinity.com/v1
+kind: ClickHouseInstallation
+metadata:
+  name: itest-ch-restore-sharded
+  namespace: default
+status:
+  status: Completed

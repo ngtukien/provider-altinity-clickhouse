@@ -1,0 +1,13 @@
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Restore
+metadata:
+  name: itest-ch-restore-sharded
+  namespace: default
+spec:
+  instanceRef:
+    name: itest-ch-restore-sharded
+  dataSource:
+    type: Backup
+    backup:
+      backupRef:
+        name: itest-ch-restore-backup-sharded

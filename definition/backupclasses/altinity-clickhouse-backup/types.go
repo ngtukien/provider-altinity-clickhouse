@@ -29,3 +29,18 @@ type AltinityClickhouseBackupConfig struct {
 	// +kubebuilder:validation:Enum=FirstPerShard;AllReplicas
 	ReplicaSelection string `json:"replicaSelection,omitempty"`
 }
+
+// AltinityClickhouseRestoreConfig is validated against Restore.spec.parameters.
+//
+// +k8s:openapi-gen=true
+type AltinityClickhouseRestoreConfig struct {
+	// Overwrite allows restoring over existing tables, which are dropped first.
+	// When false (default), the restore is refused if any target host already holds user tables.
+	Overwrite bool `json:"overwrite,omitempty"`
+	// SchemaOnly restores table and database definitions only, skipping table data.
+	SchemaOnly bool `json:"schemaOnly,omitempty"`
+	// Tables optionally restricts the restore to comma-separated table names or patterns
+	// (e.g. "db.table", "db.*") matching the clickhouse-backup syntax. Empty restores everything.
+	Tables string `json:"tables,omitempty"`
+}
+

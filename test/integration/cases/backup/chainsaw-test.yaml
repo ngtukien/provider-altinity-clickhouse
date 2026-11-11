@@ -4,11 +4,14 @@ metadata:
   name: backup
 spec:
   description: |
-    Install MinIO as an S3 object store, configure a BackupStorage and a
+    Install SeaweedFS as an S3 object store, configure a BackupStorage and a
     standalone ClickHouse Instance with backup enabled, assert the
     BackupConfigured condition and the clickhouse-backup sidecar container.
     Then run an on-demand Backup, assert it succeeds, delete the Backup and
     assert it is removed from remote storage.
+    Finally run a second on-demand Backup, delete the Instance directly while the
+    Backup still exists (with deletionPolicy: Delete), and assert both the
+    Instance and the Backup terminate cleanly without hanging.
   catch:
     - script:
         content: kubectl -n $NAMESPACE get instance,chi,backup,backupstorage,deployment,job,pod -o wide
@@ -56,26 +59,153 @@ spec:
               echo "expected backup itest-ch-backup-ondemand to be absent from remote list, but found it in:" >&2
               echo "$out" >&2
               exit 1
+    - name: delete-instance-with-backup
+      catch:
+        - script:
+            content: |
+              kubectl get instance,backup,job,pod -n default 2>&1 | grep -E '(NAME|itest-ch-backup)' || true
+              kubectl logs job/itest-ch-backup-keep-delete -n default 2>&1 || true
+      try:
+        - apply:
+            file: 30-create-backup-keep.yaml
+        - assert:
+            file: 30-assert-backup-keep.yaml
+        - script:
+            timeout: 660s
+            content: |
+              set -eu
+              NS="${NAMESPACE:-default}"
+              BACKUP="itest-ch-backup-keep"
+              INSTANCE="itest-ch-backup"
+
+              print_diagnostics() {
+                echo "=== Diagnostics for case backup ===" >&2
+                kubectl get instance,backup,job,pod -n default 2>&1 | grep -E '(NAME|itest-ch-backup)' >&2 || true
+                kubectl get instance/"$INSTANCE" backup/"$BACKUP" job/"$BACKUP-delete" -n default >&2 || true
+                echo "=== Deletion Job logs (job/$BACKUP-delete) ===" >&2
+                kubectl logs "job/$BACKUP-delete" -n default >&2 || true
+              }
+
+              echo "Deleting Instance $INSTANCE directly..."
+              kubectl delete instance.core.openeverest.io "$INSTANCE" -n "$NS" --wait=false
+
+              echo "Waiting for Instance $INSTANCE and Backup $BACKUP to be deleted (max 600s)..."
+              elapsed=0
+              timeout=600
+              interval=5
+
+              while [ "$elapsed" -lt "$timeout" ]; do
+                inst_exists=0
+                backup_exists=0
+
+                if kubectl get instance.core.openeverest.io "$INSTANCE" -n "$NS" >/dev/null 2>&1; then
+                  inst_exists=1
+                fi
+                if kubectl get backup.backup.openeverest.io "$BACKUP" -n "$NS" >/dev/null 2>&1; then
+                  backup_exists=1
+                fi
+
+                if [ "$inst_exists" -eq 0 ] && [ "$backup_exists" -eq 0 ]; then
+                  echo "Both Instance $INSTANCE and Backup $BACKUP are deleted after ${elapsed}s."
+                  exit 0
+                fi
+
+                sleep "$interval"
+                elapsed=$((elapsed + interval))
+              done
+
+              echo "Timed out waiting for Instance $INSTANCE and Backup $BACKUP to be deleted after ${timeout}s" >&2
+              if [ "$inst_exists" -ne 0 ]; then
+                echo "Instance $INSTANCE still exists" >&2
+              fi
+              if [ "$backup_exists" -ne 0 ]; then
+                echo "Backup $BACKUP still exists" >&2
+              fi
+
+              print_diagnostics
+              exit 1
       finally:
-        - command:
-            entrypoint: kubectl
-            args:
-              - delete
-              - backups.backup.openeverest.io
-              - itest-ch-backup-ondemand
-              - -n
-              - default
-              - --ignore-not-found
-        - command:
-            entrypoint: kubectl
-            args:
-              - delete
-              - instances.core.openeverest.io
-              - itest-ch-backup
-              - -n
-              - default
-              - --ignore-not-found
-              - --wait=false
+        # 1. Stop new backups: remove schedule from Instance spec and delete ClickHouseBackupSchedules
+        - script:
+            timeout: 60s
+            content: |
+              set -eu
+              kubectl patch instance.core.openeverest.io itest-ch-backup -n default --type=merge -p '{"spec":{"backup":{"storages":[{"storageRef":{"name":"itest-backup-storage"},"schedules":[]}]}}}' 2>/dev/null || true
+              for s in $(kubectl get clickhousebackupschedules.clickhouse.altinity.com -n default -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true); do
+                case "$s" in
+                  itest-ch-backup*)
+                    kubectl delete clickhousebackupschedules.clickhouse.altinity.com "$s" -n default --ignore-not-found --timeout=60s || true
+                    ;;
+                esac
+              done
+        # 2. Delete the case's Restore CRs and wait for them to be gone (timeout 120s)
+        - script:
+            timeout: 150s
+            content: |
+              set -eu
+              for r in $(kubectl get restores.backup.openeverest.io -n default -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.instanceRef.name}{"\n"}{end}' 2>/dev/null | awk '$1 ~ /^itest-ch-backup/ || $2 ~ /^itest-ch-backup/ {print $1}' || true); do
+                kubectl delete restores.backup.openeverest.io "$r" -n default --ignore-not-found --wait=false || true
+              done
+              i=0
+              remaining=""
+              while [ "$i" -lt 24 ]; do
+                remaining=$(kubectl get restores.backup.openeverest.io -n default -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.instanceRef.name}{"\n"}{end}' 2>/dev/null | awk '$1 ~ /^itest-ch-backup/ || $2 ~ /^itest-ch-backup/ {print $1}' || true)
+                if [ -z "$remaining" ]; then
+                  break
+                fi
+                i=$((i + 1))
+                sleep 5
+              done
+              if [ -n "$remaining" ]; then
+                echo "timed out waiting for restores to be deleted: $remaining" >&2
+                exit 1
+              fi
+        # 3. Delete every Backup CR of the case's Instances and wait for them to be gone (timeout 300s)
+        - script:
+            timeout: 330s
+            content: |
+              set -eu
+              kubectl delete backups.backup.openeverest.io \
+                itest-ch-backup-ondemand \
+                itest-ch-backup-keep \
+                -n default --ignore-not-found --wait=false || true
+              for b in $(kubectl get backups.backup.openeverest.io -n default -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.origin.instanceRef.name}{"\n"}{end}' 2>/dev/null | awk '$1 ~ /^itest-ch-backup/ || $2 ~ /^itest-ch-backup/ {print $1}' || true); do
+                kubectl delete backups.backup.openeverest.io "$b" -n default --ignore-not-found --wait=false || true
+              done
+              i=0
+              remaining=""
+              while [ "$i" -lt 60 ]; do
+                remaining=$(kubectl get backups.backup.openeverest.io -n default -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.origin.instanceRef.name}{"\n"}{end}' 2>/dev/null | awk '$1 ~ /^itest-ch-backup/ || $2 ~ /^itest-ch-backup/ {print $1}' || true)
+                if [ -z "$remaining" ]; then
+                  break
+                fi
+                i=$((i + 1))
+                sleep 5
+              done
+              if [ -n "$remaining" ]; then
+                echo "timed out waiting for backups to be deleted: $remaining" >&2
+                exit 1
+              fi
+        # 4. Delete the Instances and wait (timeout 300s), then their PVCs by the existing label selectors
+        - script:
+            timeout: 330s
+            content: |
+              set -eu
+              kubectl delete instances.core.openeverest.io itest-ch-backup -n default --ignore-not-found --wait=false || true
+              i=0
+              remaining=""
+              while [ "$i" -lt 60 ]; do
+                remaining=$(kubectl get instances.core.openeverest.io -n default -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -E '^itest-ch-backup' || true)
+                if [ -z "$remaining" ]; then
+                  break
+                fi
+                i=$((i + 1))
+                sleep 5
+              done
+              if [ -n "$remaining" ]; then
+                echo "timed out waiting for instances to be deleted: $remaining" >&2
+                exit 1
+              fi
         - command:
             entrypoint: kubectl
             args:
@@ -87,6 +217,7 @@ spec:
               - clickhouse.altinity.com/chi=itest-ch-backup
               - --ignore-not-found
               - --wait=false
+        # 5. Delete the BackupStorage, then the S3 store (Deployment, Service, Job, Secret) last
         - command:
             entrypoint: kubectl
             args:
@@ -96,6 +227,7 @@ spec:
               - -n
               - default
               - --ignore-not-found
+              - --timeout=60s
         - command:
             entrypoint: kubectl
             args:
@@ -106,3 +238,4 @@ spec:
               - -n
               - default
               - --ignore-not-found
+              - --timeout=60s

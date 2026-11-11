@@ -78,7 +78,7 @@ Stateful workloads additionally report:
 | Backups (on demand) | ✅ | operator-native (`executionMode: ProviderManaged`) via `clickhouse-backup`; one backup storage per Instance; see [Backups](#backups) |
 | Backups (scheduled) | ✅ | `spec.backup.storages[].schedules` → `ClickHouseBackupSchedule`; count retention only; see [Backups](#backups) |
 | Point-in-time recovery | ❌ | planned |
-| Restore | ❌ | planned |
+| Restore | ✅ | from an OpenEverest `Backup` via `ClickHouseRestore`; see [Restore](#restore) |
 
 ## Prerequisites
 
@@ -435,8 +435,7 @@ Key characteristics:
 - **One storage configuration**: The sidecar supports a single remote storage per
   cluster (`maxStorages: 1`).
 - **No PITR**: Point-in-time recovery is not supported.
-- **Restore not supported yet**: The provider rejects `Restore` custom resources;
-  restore directly via the operator's `ClickHouseRestore` CR instead.
+- **Restore**: Supported from an OpenEverest `Backup`; see [Restore](#restore).
 
 ### Setup
 
@@ -581,12 +580,60 @@ data is handled:
 
 ### Restore
 
-Restores are **not supported yet** through OpenEverest. Creating a `Restore` custom resource
-will immediately transition to `Failed` with the message:
-`restore is not supported yet by this provider; use a ClickHouseRestore directly`.
+Restore an Instance from an existing `Backup` by creating a `Restore` custom resource:
 
-To restore from an existing backup, apply the Altinity operator's native `ClickHouseRestore`
-custom resource directly against the target cluster.
+```yaml
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Restore
+metadata:
+  name: my-clickhouse-restore
+spec:
+  instanceRef:
+    name: my-clickhouse
+  dataSource:
+    type: Backup
+    backup:
+      backupRef:
+        name: my-clickhouse-backup
+  # Optional: restore parameters
+  parameters:
+    overwrite: false
+    schemaOnly: false
+    tables: "db.*"
+```
+
+The provider creates an Altinity operator `ClickHouseRestore` (operator 0.28.0) and reports its phase on the `Restore` (`Pending`, `Running`, `Succeeded`, `Failed`). A restore waits in `Pending` until the referenced `Backup` has succeeded.
+
+Restoring into a different Instance in the same namespace works (the operator reads the source installation's backup); restoring from scheduled backups works as well. The target Instance must have the Backup's storage registered and enabled in `spec.backup.storages` (its `clickhouse-backup` sidecar reads only its own storage).
+
+By default (`overwrite: false`), the restore is refused if the target already holds user tables; setting `overwrite: true` drops existing tables first. The operator validates topology by default: a backup taken from a different shard layout is refused.
+
+Optional parameters under `spec.parameters`:
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `overwrite` | `bool` | `false` | When `false`, the restore is refused if the target already holds user tables; when `true`, existing tables are dropped first. |
+| `schemaOnly` | `bool` | `false` | When `true`, restores database and table schemas only, without data. |
+| `tables` | `string` | *(all tables)* | Table filter pattern passed to `clickhouse-backup` (such as `db.*` or `db.table`). |
+
+Deleting the `Restore` deletes the underlying `ClickHouseRestore`; it does not undo the restored data.
+
+Operational notes:
+- **Dropped tables**: ClickHouse's Atomic database engine keeps a dropped table's data directory for
+  `database_atomic_delay_before_drop_table_sec` (default 480 seconds) unless the table was dropped with
+  `DROP TABLE ... SYNC`. A restore started within that window fails with
+  `code: 57 ... Directory for table data store/... already exists`, because the restore recreates the table
+  with the same UUID. Drop with `SYNC` before restoring, or wait out the delay, then retry the Restore
+  (create a new `Restore` CR; a failed one is terminal).
+- **Schedules after a failed restore**: After a failed restore, the Altinity operator suspends the
+  Instance's `ClickHouseBackupSchedule` (its status shows `SuspendedForFailedRestore`), so scheduled backups
+  stop until a later restore succeeds or the schedule is resumed. Check the schedule status and the
+  operator documentation.
+
+Unsupported operations:
+- Point-in-time restore
+- Seeding a new Instance via `Instance.spec.dataSource`
+- External backups
 
 ### Limitations
 

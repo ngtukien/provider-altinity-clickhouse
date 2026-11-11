@@ -29,6 +29,24 @@ spec:
       maxPITREnabledStorages: 0
       maxStorages: 1
     supportsPITR: false
+  restoreParametersSchema:
+    openAPIV3Schema:
+      description: AltinityClickhouseRestoreConfig is validated against Restore.spec.parameters.
+      properties:
+        overwrite:
+          description: |-
+            Overwrite allows restoring over existing tables, which are dropped first.
+            When false (default), the restore is refused if any target host already holds user tables.
+          type: boolean
+        schemaOnly:
+          description: SchemaOnly restores table and database definitions only, skipping table data.
+          type: boolean
+        tables:
+          description: |-
+            Tables optionally restricts the restore to comma-separated table names or patterns
+            (e.g. "db.table", "db.*") matching the clickhouse-backup syntax. Empty restores everything.
+          type: string
+      type: object
   supportedProviders:
     - altinity-clickhouse
   uiSchema:
@@ -48,3 +66,30 @@ spec:
       componentsOrder:
         - replicaSelection
       label: Backup Configuration
+    restore:
+      components:
+        overwrite:
+          fieldParams:
+            defaultValue: false
+            helperText: Drop existing tables before restoring. When false (default), the restore is refused if any target host already holds user tables.
+            label: Overwrite existing tables
+          path: overwrite
+          uiType: toggle
+        schemaOnly:
+          fieldParams:
+            defaultValue: false
+            helperText: Restore schema and table definitions only, skipping table data.
+            label: Schema only
+          path: schemaOnly
+          uiType: toggle
+        tables:
+          fieldParams:
+            helperText: Restrict restore to matching table patterns (e.g. "db.table", "db.*"). Empty restores all tables.
+            label: Tables
+          path: tables
+          uiType: text
+      componentsOrder:
+        - overwrite
+        - schemaOnly
+        - tables
+      label: Restore Configuration

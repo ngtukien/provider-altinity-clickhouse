@@ -174,6 +174,42 @@ wired to it. The table keeps its rows on the first replica, its schema
 reaches the new replica, and rows copied into a `ReplicatedMergeTree` table
 replicate.
 
+### `backup`
+
+End-to-end verification of the backup feature (`backup.openeverest.io/v1alpha1` `Backup`):
+
+1. **On-demand backup**: Provisions SeaweedFS S3 object store, a `BackupStorage`, and a
+   standalone Instance `itest-ch-backup` with backup enabled. Asserts the `BackupConfigured`
+   condition and the `clickhouse-backup` sidecar container on the CHI pod. Takes an
+   on-demand `Backup` (`itest-ch-backup-ondemand`, `deletionPolicy: Delete`), asserts it reaches
+   `Succeeded`, then deletes the Backup and asserts remote backup data is removed from storage.
+2. **Instance deletion with active backup**: Applies a second on-demand `Backup`
+   (`itest-ch-backup-keep`, `deletionPolicy: Delete`) and asserts it reaches `Succeeded`.
+   Then directly deletes the Instance without deleting the Backup first, and asserts both the
+   Instance and the Backup terminate cleanly within 600s (verifying that the provider skips
+   remote-data deletion when the CHI/sidecar is gone instead of hanging on retry).
+
+### `restore`
+
+End-to-end verification of the restore feature (`backup.openeverest.io/v1alpha1` `Restore`):
+
+1. **Standalone restore**: Provisions SeaweedFS S3 object store, a `BackupStorage`, and a
+   standalone Instance `itest-ch-restore` with backup enabled. Creates a `MergeTree`
+   table with test rows, takes an on-demand `Backup`, drops the table, restores from the
+   backup, and asserts the table and row count are recovered.
+2. **Scheduled backup restore**: Waits for an automated scheduled backup run to be mirrored
+   and succeed, then restores from that scheduled backup using its remote name with overwrite.
+3. **Overwrite semantics**: With the table present, asserts that restore without parameters
+   fails (`overwrite: false` refuses when user tables exist). Then restores with
+   `parameters: {overwrite: true}` and asserts it succeeds with the expected row count.
+4. **Cross-instance restore**: Provisions an empty target Instance `itest-ch-restore-target`
+   sharing the same backup storage, restores the source Instance's backup into it, and
+   asserts data is present on the target.
+5. **Sharded restore**: Provisions a 2-shard Instance `itest-ch-restore-sharded` backed by
+   Keeper, creates a `ReplicatedMergeTree` table and a `Distributed` table, inserts rows
+   across shards, takes an on-demand backup, drops the tables, restores, and verifies the
+   total distributed row count matches.
+
 ### `admission`
 
 Exercises the provider's admission webhook with a standalone Instance asking

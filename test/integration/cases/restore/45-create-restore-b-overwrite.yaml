@@ -1,0 +1,15 @@
+apiVersion: backup.openeverest.io/v1alpha1
+kind: Restore
+metadata:
+  name: itest-ch-restore-b-overwrite
+  namespace: default
+spec:
+  instanceRef:
+    name: itest-ch-restore
+  dataSource:
+    type: Backup
+    backup:
+      backupRef:
+        name: itest-ch-restore-backup-a
+  parameters:
+    overwrite: true

@@ -1,0 +1,467 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: restore
+spec:
+  description: |
+    End-to-end verification of the restore feature (backup.openeverest.io/v1alpha1 Restore).
+    Exercises:
+    a. Standalone restore: create SeaweedFS + BackupStorage + standalone Instance, insert data,
+       backup, drop table, restore, verify rows recovered.
+    d. Scheduled backup restore: wait for mirrored scheduled backup to succeed, restore with overwrite.
+    b. Overwrite semantics: restore without overwrite is refused (fails); restore with
+       overwrite: true succeeds.
+    c. Cross-instance restore: restore backup of first instance into a second empty instance.
+    e. Sharded restore: 2-shard cluster with ReplicatedMergeTree and Distributed table,
+       backup, drop, restore, verify total row count matches.
+  catch:
+    - script:
+        content: |
+          kubectl -n "$NAMESPACE" get instance,chi,chk,backup,restore,clickhouserestore,clickhousebackupschedule,backupstorage,deployment,job,pod -o wide || true
+    - script:
+        content: |
+          kubectl logs -n default -l app.kubernetes.io/name=provider-altinity-clickhouse --tail=100 || true
+  steps:
+    - name: scenario-a-basic-restore
+      catch:
+        - script:
+            content: |
+              kubectl -n "$NAMESPACE" describe instance/itest-ch-restore || true
+              kubectl -n "$NAMESPACE" describe restore/itest-ch-restore-a || true
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh
+      try:
+        - apply:
+            file: 00-minio.yaml
+        - script:
+            timeout: 120s
+            content: |
+              set -eu
+              kubectl wait --for=condition=Available deployment/itest-ch-restore-minio -n "$NAMESPACE" --timeout=90s
+              kubectl wait --for=condition=Complete job/itest-ch-restore-minio-create-bucket -n "$NAMESPACE" --timeout=90s
+        - apply:
+            file: 10-create-instance.yaml
+        - assert:
+            file: 10-assert-instance.yaml
+        - script:
+            timeout: 180s
+            content: |
+              set -eu
+              NS="$NAMESPACE"
+              NAME="itest-ch-restore"
+
+              PW=$(kubectl get secret "$NAME-credentials" -n "$NS" -o jsonpath='{.data.password}' | base64 -d)
+              POD=$(kubectl get pods -n "$NS" -l "clickhouse.altinity.com/chi=$NAME" -o jsonpath='{.items[0].metadata.name}')
+
+              if [ -z "$POD" ]; then
+                echo "ClickHouse pod not found for $NAME" >&2
+                exit 1
+              fi
+
+              i=0
+              while [ "$i" -lt 30 ]; do
+                if kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q "SELECT 1" >/dev/null 2>&1; then
+                  break
+                fi
+                i=$((i + 1))
+                sleep 2
+              done
+              if [ "$i" -ge 30 ]; then
+                echo "timed out waiting for ClickHouse to accept connections" >&2
+                exit 1
+              fi
+
+              kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                "CREATE TABLE IF NOT EXISTS default.test_restore (id UInt64, s String) ENGINE = MergeTree() ORDER BY id"
+              kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                "INSERT INTO default.test_restore SELECT number, concat('val_', toString(number)) FROM numbers(10)"
+
+              count=$(kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                "SELECT count() FROM default.test_restore")
+              if [ "$count" != "10" ]; then
+                echo "expected 10 rows, got: $count" >&2
+                exit 1
+              fi
+        - apply:
+            file: 20-create-backup.yaml
+        - assert:
+            file: 20-assert-backup.yaml
+        - script:
+            timeout: 60s
+            content: |
+              set -eu
+              NS="$NAMESPACE"
+              NAME="itest-ch-restore"
+
+              PW=$(kubectl get secret "$NAME-credentials" -n "$NS" -o jsonpath='{.data.password}' | base64 -d)
+              POD=$(kubectl get pods -n "$NS" -l "clickhouse.altinity.com/chi=$NAME" -o jsonpath='{.items[0].metadata.name}')
+
+              kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                "DROP TABLE default.test_restore SYNC"
+
+              exists=$(kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                "EXISTS TABLE default.test_restore")
+              if [ "$exists" != "0" ]; then
+                echo "expected table default.test_restore to be dropped, but exists reports: $exists" >&2
+                exit 1
+              fi
+        - apply:
+            file: 30-create-restore-a.yaml
+        - assert:
+            file: 30-assert-restore-a.yaml
+        - script:
+            timeout: 120s
+            content: |
+              set -eu
+              NS="$NAMESPACE"
+              NAME="itest-ch-restore"
+
+              PW=$(kubectl get secret "$NAME-credentials" -n "$NS" -o jsonpath='{.data.password}' | base64 -d)
+              POD=$(kubectl get pods -n "$NS" -l "clickhouse.altinity.com/chi=$NAME" -o jsonpath='{.items[0].metadata.name}')
+
+              i=0
+              count=0
+              while [ "$i" -lt 30 ]; do
+                count=$(kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                  "SELECT count() FROM default.test_restore" 2>/dev/null || echo 0)
+                if [ "$count" = "10" ]; then
+                  break
+                fi
+                i=$((i + 1))
+                sleep 2
+              done
+              if [ "$count" != "10" ]; then
+                echo "expected row count 10 after restore, got: $count" >&2
+                exit 1
+              fi
+
+    - name: scenario-d-scheduled-backup-restore
+      catch:
+        - script:
+            content: |
+              kubectl -n "$NAMESPACE" get cronjob,job,clickhousebackupschedule,backup,restore -o wide || true
+              kubectl -n "$NAMESPACE" describe restore/itest-ch-restore-d-sched || true
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh
+      try:
+        - script:
+            timeout: 600s
+            content: |
+              set -eu
+              NS="$NAMESPACE"
+              NAME="itest-ch-restore"
+
+              # 1. Wait for a mirrored Backup CR created by the schedule to reach Succeeded
+              # Run before b (b's failed restore suspends the schedule) and wait for a backup created after data was verified (earlier backups lack the table).
+              START_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+              BACKUP_NAME=""
+              i=0
+              while [ "$i" -lt 60 ]; do
+                BACKUP_NAME=$(kubectl get backup -n "$NS" -o jsonpath='{range .items[?(@.spec.origin.instanceRef.name=="'"$NAME"'")]}{.metadata.name}{"\t"}{.status.state}{"\t"}{.spec.scheduleName}{"\t"}{.metadata.creationTimestamp}{"\n"}{end}' 2>/dev/null | awk -F'\t' -v start="$START_TIME" '$2=="Succeeded" && $3!="" && $4 > start {print $1; exit}')
+                if [ -n "$BACKUP_NAME" ]; then
+                  echo "Found succeeded scheduled backup: $BACKUP_NAME"
+                  break
+                fi
+                i=$((i + 1))
+                sleep 5
+              done
+
+              if [ -z "$BACKUP_NAME" ]; then
+                echo "timed out waiting for a scheduled backup to succeed" >&2
+                exit 1
+              fi
+
+              # 2. Create Restore CR referencing the scheduled backup with overwrite: true
+              cat <<EOF | kubectl apply -f -
+              apiVersion: backup.openeverest.io/v1alpha1
+              kind: Restore
+              metadata:
+                name: itest-ch-restore-d-sched
+                namespace: $NS
+              spec:
+                instanceRef:
+                  name: $NAME
+                dataSource:
+                  type: Backup
+                  backup:
+                    backupRef:
+                      name: $BACKUP_NAME
+                parameters:
+                  overwrite: true
+              EOF
+
+              # 3. Wait for the Restore CR to reach Succeeded
+              i=0
+              while [ "$i" -lt 36 ]; do
+                state=$(kubectl get restore.backup.openeverest.io itest-ch-restore-d-sched -n "$NS" -o jsonpath='{.status.state}' 2>/dev/null || echo "")
+                if [ "$state" = "Succeeded" ]; then
+                  echo "Restore itest-ch-restore-d-sched Succeeded"
+                  break
+                elif [ "$state" = "Failed" ]; then
+                  echo "Restore itest-ch-restore-d-sched Failed" >&2
+                  exit 1
+                fi
+                i=$((i + 1))
+                sleep 5
+              done
+              if [ "$i" -ge 36 ]; then
+                echo "timed out waiting for restore itest-ch-restore-d-sched to reach Succeeded" >&2
+                exit 1
+              fi
+
+              # 4. Verify row count is 10
+              PW=$(kubectl get secret "$NAME-credentials" -n "$NS" -o jsonpath='{.data.password}' | base64 -d)
+              POD=$(kubectl get pods -n "$NS" -l "clickhouse.altinity.com/chi=$NAME" -o jsonpath='{.items[0].metadata.name}')
+
+              count=$(kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                "SELECT count() FROM default.test_restore")
+              if [ "$count" != "10" ]; then
+                echo "expected row count 10 after restore from scheduled backup, got: $count" >&2
+                exit 1
+              fi
+
+    - name: scenario-b-overwrite-semantics
+      catch:
+        - script:
+            content: |
+              kubectl -n "$NAMESPACE" describe restore/itest-ch-restore-b-refused || true
+              kubectl -n "$NAMESPACE" describe restore/itest-ch-restore-b-overwrite || true
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh
+      try:
+        - apply:
+            file: 40-create-restore-b-refused.yaml
+        - assert:
+            file: 40-assert-restore-b-refused.yaml
+        - apply:
+            file: 45-create-restore-b-overwrite.yaml
+        - assert:
+            file: 45-assert-restore-b-overwrite.yaml
+        - script:
+            timeout: 60s
+            content: |
+              set -eu
+              NS="$NAMESPACE"
+              NAME="itest-ch-restore"
+
+              PW=$(kubectl get secret "$NAME-credentials" -n "$NS" -o jsonpath='{.data.password}' | base64 -d)
+              POD=$(kubectl get pods -n "$NS" -l "clickhouse.altinity.com/chi=$NAME" -o jsonpath='{.items[0].metadata.name}')
+
+              count=$(kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                "SELECT count() FROM default.test_restore")
+              if [ "$count" != "10" ]; then
+                echo "expected row count 10 after overwrite restore, got: $count" >&2
+                exit 1
+              fi
+
+    - name: scenario-c-cross-instance-restore
+      catch:
+        - script:
+            content: |
+              kubectl -n "$NAMESPACE" describe instance/itest-ch-restore-target || true
+              kubectl -n "$NAMESPACE" describe restore/itest-ch-restore-c-target || true
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh
+      try:
+        - apply:
+            file: 50-create-target-instance.yaml
+        - assert:
+            file: 50-assert-target-instance.yaml
+        - script:
+            timeout: 120s
+            content: |
+              set -eu
+              NS="$NAMESPACE"
+              NAME="itest-ch-restore-target"
+
+              PW=$(kubectl get secret "$NAME-credentials" -n "$NS" -o jsonpath='{.data.password}' | base64 -d)
+              POD=$(kubectl get pods -n "$NS" -l "clickhouse.altinity.com/chi=$NAME" -o jsonpath='{.items[0].metadata.name}')
+
+              if [ -z "$POD" ]; then
+                echo "ClickHouse pod not found for $NAME" >&2
+                exit 1
+              fi
+
+              i=0
+              while [ "$i" -lt 30 ]; do
+                if kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q "SELECT 1" >/dev/null 2>&1; then
+                  break
+                fi
+                i=$((i + 1))
+                sleep 2
+              done
+
+              exists=$(kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                "EXISTS TABLE default.test_restore" 2>/dev/null || echo 0)
+              if [ "$exists" != "0" ]; then
+                echo "expected target instance to be empty, but table exists" >&2
+                exit 1
+              fi
+        - apply:
+            file: 55-create-restore-c-target.yaml
+        - assert:
+            file: 55-assert-restore-c-target.yaml
+        - script:
+            timeout: 120s
+            content: |
+              set -eu
+              NS="$NAMESPACE"
+              NAME="itest-ch-restore-target"
+
+              PW=$(kubectl get secret "$NAME-credentials" -n "$NS" -o jsonpath='{.data.password}' | base64 -d)
+              POD=$(kubectl get pods -n "$NS" -l "clickhouse.altinity.com/chi=$NAME" -o jsonpath='{.items[0].metadata.name}')
+
+              i=0
+              count=0
+              while [ "$i" -lt 30 ]; do
+                count=$(kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                  "SELECT count() FROM default.test_restore" 2>/dev/null || echo 0)
+                if [ "$count" = "10" ]; then
+                  break
+                fi
+                i=$((i + 1))
+                sleep 2
+              done
+              if [ "$count" != "10" ]; then
+                echo "expected row count 10 on target after cross-instance restore, got: $count" >&2
+                exit 1
+              fi
+
+    - name: scenario-e-sharded-instance-restore
+      catch:
+        - script:
+            content: |
+              kubectl -n "$NAMESPACE" describe instance/itest-ch-restore-sharded || true
+              kubectl -n "$NAMESPACE" describe backup/itest-ch-restore-backup-sharded || true
+              kubectl -n "$NAMESPACE" describe restore/itest-ch-restore-sharded || true
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh
+      try:
+        - apply:
+            file: 60-create-sharded-instance.yaml
+        - assert:
+            timeout: 20m
+            file: 60-assert-sharded-instance.yaml
+        - script:
+            timeout: 240s
+            content: |
+              set -eu
+              NS="$NAMESPACE"
+              NAME="itest-ch-restore-sharded"
+
+              PW=$(kubectl get secret "$NAME-credentials" -n "$NS" -o jsonpath='{.data.password}' | base64 -d)
+              POD=$(kubectl get pods -n "$NS" -l "clickhouse.altinity.com/chi=$NAME" -o jsonpath='{.items[0].metadata.name}')
+
+              if [ -z "$POD" ]; then
+                echo "ClickHouse pod not found for $NAME" >&2
+                exit 1
+              fi
+
+              i=0
+              while [ "$i" -lt 36 ]; do
+                if kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q "SELECT 1" >/dev/null 2>&1; then
+                  break
+                fi
+                i=$((i + 1))
+                sleep 5
+              done
+              if [ "$i" -ge 36 ]; then
+                echo "timed out waiting for ClickHouse to accept connections" >&2
+                exit 1
+              fi
+
+              # Wait for cluster to see 2 hosts (2 shards)
+              i=0
+              hosts=0
+              while [ "$i" -lt 36 ]; do
+                hosts=$(kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                  "SELECT count() FROM system.clusters WHERE cluster = 'clickhouse'" 2>/dev/null || echo 0)
+                if [ "$hosts" -ge 2 ]; then
+                  break
+                fi
+                i=$((i + 1))
+                sleep 5
+              done
+              if [ "$hosts" -lt 2 ]; then
+                echo "expected >=2 hosts in cluster, got: $hosts" >&2
+                exit 1
+              fi
+
+              kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                "CREATE TABLE IF NOT EXISTS default.test_sharded ON CLUSTER '{cluster}' (id UInt64, val String) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/test_sharded', '{replica}') ORDER BY id"
+              kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                "CREATE TABLE IF NOT EXISTS default.test_dist ON CLUSTER '{cluster}' AS default.test_sharded ENGINE = Distributed('{cluster}', default, test_sharded, rand())"
+              kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                "INSERT INTO default.test_dist SELECT number, concat('val_', toString(number)) FROM numbers(20)"
+
+              count=$(kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                "SELECT count() FROM default.test_dist")
+              if [ "$count" != "20" ]; then
+                echo "expected 20 rows in Distributed table, got: $count" >&2
+                exit 1
+              fi
+        - apply:
+            file: 65-create-backup-sharded.yaml
+        - assert:
+            timeout: 10m
+            file: 65-assert-backup-sharded.yaml
+        - script:
+            timeout: 60s
+            content: |
+              set -eu
+              NS="$NAMESPACE"
+              NAME="itest-ch-restore-sharded"
+
+              PW=$(kubectl get secret "$NAME-credentials" -n "$NS" -o jsonpath='{.data.password}' | base64 -d)
+              POD=$(kubectl get pods -n "$NS" -l "clickhouse.altinity.com/chi=$NAME" -o jsonpath='{.items[0].metadata.name}')
+
+              kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                "DROP TABLE IF EXISTS default.test_dist ON CLUSTER '{cluster}' SYNC"
+              kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                "DROP TABLE IF EXISTS default.test_sharded ON CLUSTER '{cluster}' SYNC"
+
+              exists=$(kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                "EXISTS TABLE default.test_dist")
+              if [ "$exists" != "0" ]; then
+                echo "expected table default.test_dist to be dropped, got: $exists" >&2
+                exit 1
+              fi
+        - apply:
+            file: 70-create-restore-sharded.yaml
+        - assert:
+            timeout: 10m
+            file: 70-assert-restore-sharded.yaml
+        - script:
+            timeout: 120s
+            content: |
+              set -eu
+              NS="$NAMESPACE"
+              NAME="itest-ch-restore-sharded"
+
+              PW=$(kubectl get secret "$NAME-credentials" -n "$NS" -o jsonpath='{.data.password}' | base64 -d)
+              POD=$(kubectl get pods -n "$NS" -l "clickhouse.altinity.com/chi=$NAME" -o jsonpath='{.items[0].metadata.name}')
+
+              i=0
+              count=0
+              while [ "$i" -lt 30 ]; do
+                count=$(kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
+                  "SELECT count() FROM default.test_dist" 2>/dev/null || echo 0)
+                if [ "$count" = "20" ]; then
+                  break
+                fi
+                i=$((i + 1))
+                sleep 2
+              done
+              if [ "$count" != "20" ]; then
+                echo "expected row count 20 after sharded restore, got: $count" >&2
+                exit 1
+              fi
+      finally:
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh

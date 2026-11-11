@@ -45,26 +45,37 @@ spec:
       labels:
         app: minio
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
-        - name: minio
-          image: minio/minio:RELEASE.2024-10-02T17-50-41Z
+        - name: seaweedfs
+          image: chrislusf/seaweedfs:3.80
           args:
             - server
-            - /data
-          env:
-            - name: MINIO_ROOT_USER
-              value: minioadmin
-            - name: MINIO_ROOT_PASSWORD
-              value: minioadmin
+            - -dir=/data
+            - -s3
+            - -s3.port=9000
+            - -volume.max=0
+            - -master.volumeSizeLimitMB=64
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - name: s3
               containerPort: 9000
           readinessProbe:
-            httpGet:
-              path: /minio/health/ready
-              port: s3
+            tcpSocket:
+              port: 9000
             initialDelaySeconds: 2
             periodSeconds: 2
+            failureThreshold: 30
           resources:
             requests:
               cpu: 100m
@@ -108,16 +119,65 @@ spec:
         app: minio
     spec:
       restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
-        - name: mc
-          image: minio/mc:RELEASE.2024-10-29T15-34-59Z
+        - name: create-bucket
+          image: amazon/aws-cli:2.22.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: HOME
+              value: /tmp
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+            - name: AWS_REGION
+              value: us-east-1
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: itest-backup-credentials
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: itest-backup-credentials
+                  key: AWS_SECRET_ACCESS_KEY
           command:
             - /bin/sh
             - -c
             - |
-              until mc alias set minio http://minio:9000 minioadmin minioadmin; do
-                echo "waiting for minio..."
-                sleep 1
+              ENDPOINT="http://minio:9000"
+              BUCKET="clickhouse-backups"
+              for i in $(seq 1 30); do
+                echo "Attempt $i: creating bucket s3://$BUCKET at $ENDPOINT..."
+                if out=$(aws --endpoint-url "$ENDPOINT" s3 mb "s3://$BUCKET" 2>&1); then
+                  echo "$out"
+                  echo "Bucket $BUCKET created successfully"
+                  exit 0
+                fi
+                if aws --endpoint-url "$ENDPOINT" s3 ls "s3://$BUCKET" >/dev/null 2>&1; then
+                  echo "Bucket $BUCKET already exists"
+                  exit 0
+                fi
+                echo "aws s3 mb failed: $out"
+                echo "Waiting for S3 endpoint..."
+                sleep 2
               done
-              mc mb minio/clickhouse-backups --ignore-existing
+              echo "Timed out waiting for S3 endpoint $ENDPOINT" >&2
+              exit 1
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
   backoffLimit: 10

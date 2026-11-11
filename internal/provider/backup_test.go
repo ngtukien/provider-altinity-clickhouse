@@ -390,29 +390,11 @@ func TestSyncBackup_MissingCHBTerminalAndNonTerminal(t *testing.T) {
 	})
 }
 
-func TestSyncRestore_And_Cleanup(t *testing.T) {
+func TestCleanupBackup(t *testing.T) {
 	p := &Provider{}
 	ns := "default"
 	instName := "test-ch"
 	instance := testInstanceWithStorage(instName, ns, "s3-storage")
-
-	restore := &backupv1alpha1.Restore{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-restore",
-			Namespace: ns,
-		},
-	}
-
-	c := newBackupTestContext(t, instance)
-
-	resStatus, err := p.SyncRestore(c, restore)
-	require.NoError(t, err)
-	assert.Equal(t, backupv1alpha1.RestoreStateFailed, resStatus.State)
-	assert.Equal(t, "restore is not supported yet by this provider; use a ClickHouseRestore directly", resStatus.Message)
-
-	done, err := p.CleanupRestore(c, restore)
-	require.NoError(t, err)
-	assert.True(t, done)
 
 	backup := &backupv1alpha1.Backup{
 		ObjectMeta: metav1.ObjectMeta{

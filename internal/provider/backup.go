@@ -237,14 +237,6 @@ func (p *Provider) SyncBackup(c *controller.Context, backup *backupv1alpha1.Back
 	return exec, nil
 }
 
-// SyncRestore reconciles a single Restore CR.
-func (p *Provider) SyncRestore(c *controller.Context, restore *backupv1alpha1.Restore) (controller.RestoreExecutionStatus, error) {
-	return controller.RestoreExecutionStatus{
-		State:   backupv1alpha1.RestoreStateFailed,
-		Message: "restore is not supported yet by this provider; use a ClickHouseRestore directly",
-	}, nil
-}
-
 // CleanupBackup deletes the operator ClickHouseBackup resource and waits until gone.
 func (p *Provider) CleanupBackup(c *controller.Context, backup *backupv1alpha1.Backup) (bool, error) {
 	l := log.FromContext(c.Context())
@@ -285,11 +277,6 @@ func (p *Provider) CleanupBackup(c *controller.Context, backup *backupv1alpha1.B
 		}
 	}
 	return false, nil
-}
-
-// CleanupRestore removes restore resources.
-func (p *Provider) CleanupRestore(c *controller.Context, restore *backupv1alpha1.Restore) (bool, error) {
-	return true, nil
 }
 
 // BackupWatches implements controller.BackupWatcher.
