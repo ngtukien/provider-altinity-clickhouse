@@ -184,6 +184,11 @@ func (p *Provider) sync(c *controller.Context) error {
 		return err
 	}
 
+	// Wait here, not in buildCHI: wrapped wait errors are not recognised.
+	if _, err := resolveColdStorage(c); err != nil {
+		return err
+	}
+
 	// Provision TLS certificates before creating the CHI so the operator can
 	// mount the server certificate secret. Returns a WaitError until issued.
 	if tlsEnabled(c) {
@@ -624,6 +629,15 @@ func buildCHIWired(c *controller.Context, replicasCount int, keeper keeperWiring
 	_ = c.TryDecodeComponentParameters(engine, &params)
 	spec.Configuration.Profiles = applyQueryLimits(settings,
 		resolveQueryLimits(params.QueryLimits, resources.Limits[corev1.ResourceMemory]))
+	if p := coldStorageParams(c); p != nil {
+		bs, err := resolveColdStorage(c)
+		if err != nil {
+			return nil, err
+		}
+		if err := applyColdStorage(settings, bs, p, c.Instance().Namespace, c.Name(), storageSize); err != nil {
+			return nil, err
+		}
+	}
 
 	if settings != nil {
 		spec.Configuration.Settings = settings

@@ -42,6 +42,27 @@ spec:
             ClickHouseParameters defines custom parameters for the ClickHouse engine component.
             Provider users specify these fields in the Instance's engine component parameters.
           properties:
+            coldStorage:
+              description: |-
+                ColdStorage adds an S3 disk and a storage policy "tiered" (volumes "hot"
+                on the data volume, "cold" on S3) for tables that opt in with
+                `SETTINGS storage_policy = 'tiered'` and move old data with
+                `TTL ... TO VOLUME 'cold'`. The default policy is unchanged.
+              properties:
+                cachePercent:
+                  description: |-
+                    CachePercent is the share of the engine's storage size used as a local
+                    read cache for cold data, from 1 to 50. Default 10.
+                  type: integer
+                storageRef:
+                  description: |-
+                    StorageRef names a BackupStorage (backup.openeverest.io) in the
+                    Instance's namespace whose S3 bucket, endpoint and credentials hold the
+                    cold data, under <namespace>/<instance>/cold/.
+                  type: string
+              required:
+                - storageRef
+              type: object
             configuration:
               description: |-
                 Configuration holds custom ClickHouse server settings as YAML.

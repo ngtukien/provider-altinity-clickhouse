@@ -1,0 +1,59 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: itest-ch-ts-s3-list
+  namespace: default
+  labels:
+    app: itest-ch-ts-s3
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: itest-ch-ts-s3
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: list
+          image: amazon/aws-cli:2.22.0
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: HOME
+              value: /tmp
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: itest-ch-ts-s3-credentials
+                  key: AWS_ACCESS_KEY_ID
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: itest-ch-ts-s3-credentials
+                  key: AWS_SECRET_ACCESS_KEY
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # Cold data lives under <namespace>/<instance>/cold/ (see coldEndpoint).
+              n=$(aws --endpoint-url http://itest-ch-ts-s3:9000 s3 ls --recursive s3://clickhouse-cold/default/itest-ch-ts/cold/ | wc -l)
+              echo "objects under default/itest-ch-ts/cold/: $n"
+              [ "$n" -gt 0 ]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

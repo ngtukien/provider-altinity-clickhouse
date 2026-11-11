@@ -1,0 +1,153 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: tiered-storage
+spec:
+  description: |
+    End-to-end verification of tiered storage (engine parameter coldStorage).
+    a. SeaweedFS + BackupStorage + standalone Instance with coldStorage: the S3 disk, its
+       cache disk and the "tiered" policy (volumes hot, cold) exist.
+    b. A table on the tiered policy with a TTL moves its old part to the cold volume while
+       the new part stays on the default disk; all rows stay readable.
+    c. The cold part's objects are in the bucket under <namespace>/<instance>/cold/.
+    d. After the ClickHouse pod restarts, all rows (cold ones included) are still readable.
+  catch:
+    - script:
+        content: |
+          kubectl -n "$NAMESPACE" get instance,chi,backupstorage,deployment,job,pod -o wide || true
+    - script:
+        content: |
+          kubectl logs -n everest-system -l app.kubernetes.io/name=provider-altinity-clickhouse --tail=100 || true
+  steps:
+    - name: scenario-a-disks-and-policy
+      catch:
+        - script:
+            content: |
+              kubectl -n "$NAMESPACE" describe instance/itest-ch-ts || true
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh
+      try:
+        - apply:
+            file: 00-s3.yaml
+        - script:
+            timeout: 200s
+            content: |
+              set -eu
+              kubectl wait --for=condition=Available deployment/itest-ch-ts-s3 -n "$NAMESPACE" --timeout=90s
+              kubectl wait --for=condition=Complete job/itest-ch-ts-s3-create-bucket -n "$NAMESPACE" --timeout=90s
+        - apply:
+            file: 10-create-instance.yaml
+        - assert:
+            timeout: 15m
+            file: 10-assert-instance.yaml
+        - script:
+            timeout: 120s
+            content: |
+              set -eu
+              PW=$(kubectl get secret itest-ch-ts-credentials -n "$NAMESPACE" -o jsonpath='{.data.password}' | base64 -d)
+              POD=$(kubectl get pods -n "$NAMESPACE" -l clickhouse.altinity.com/chi=itest-ch-ts -o jsonpath='{.items[0].metadata.name}')
+              ch() { kubectl exec -n "$NAMESPACE" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q "$1"; }
+              i=0
+              until ch "SELECT 1" >/dev/null 2>&1; do
+                i=$((i + 1)); [ "$i" -lt 30 ] || { echo "ClickHouse does not accept connections" >&2; exit 1; }; sleep 2
+              done
+              disks=$(ch "SELECT arrayStringConcat(arraySort(groupArray(name)), ',') FROM system.disks WHERE name IN ('s3_cold', 's3_cold_cache')")
+              [ "$disks" = "s3_cold,s3_cold_cache" ] || { echo "expected disks s3_cold,s3_cold_cache, got: $disks" >&2; exit 1; }
+              vols=$(ch "SELECT arrayStringConcat(groupArray(volume_name), ',') FROM (SELECT volume_name FROM system.storage_policies WHERE policy_name = 'tiered' ORDER BY volume_priority)")
+              [ "$vols" = "hot,cold" ] || { echo "expected policy tiered with volumes hot,cold, got: $vols" >&2; exit 1; }
+
+    - name: scenario-b-ttl-moves-old-part
+      catch:
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh
+      try:
+        - script:
+            timeout: 330s
+            content: |
+              set -eu
+              PW=$(kubectl get secret itest-ch-ts-credentials -n "$NAMESPACE" -o jsonpath='{.data.password}' | base64 -d)
+              POD=$(kubectl get pods -n "$NAMESPACE" -l clickhouse.altinity.com/chi=itest-ch-ts -o jsonpath='{.items[0].metadata.name}')
+              ch() { kubectl exec -n "$NAMESPACE" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q "$1"; }
+              ch "CREATE TABLE IF NOT EXISTS default.t (ts DateTime, v UInt64) ENGINE = MergeTree ORDER BY ts TTL ts + INTERVAL 1 DAY TO VOLUME 'cold' SETTINGS storage_policy = 'tiered'"
+              # Two inserts give two parts: one past the TTL, one recent.
+              ch "INSERT INTO default.t SELECT now() - INTERVAL 10 DAY, number FROM numbers(100)"
+              ch "INSERT INTO default.t SELECT now(), number FROM numbers(50)"
+              ch "ALTER TABLE default.t MATERIALIZE TTL SETTINGS mutations_sync = 2"
+              i=0
+              disks=""
+              while [ "$i" -lt 60 ]; do
+                disks=$(ch "SELECT arrayStringConcat(arraySort(groupUniqArray(disk_name)), ',') FROM system.parts WHERE database = 'default' AND table = 't' AND active")
+                case ",$disks," in
+                  *,default,*) case ",$disks," in *,s3_cold,*|*,s3_cold_cache,*) break ;; esac ;;
+                esac
+                i=$((i + 1))
+                sleep 5
+              done
+              echo "active parts on disks: $disks"
+              case ",$disks," in *,default,*) ;; *) echo "expected a part on disk default" >&2; exit 1 ;; esac
+              case ",$disks," in *,s3_cold,*|*,s3_cold_cache,*) ;; *) echo "expected a part on the cold disk" >&2; exit 1 ;; esac
+              count=$(ch "SELECT count() FROM default.t")
+              [ "$count" = "150" ] || { echo "expected 150 rows, got: $count" >&2; exit 1; }
+
+    - name: scenario-c-objects-in-bucket
+      catch:
+        - script:
+            content: |
+              kubectl logs -n "$NAMESPACE" job/itest-ch-ts-s3-list || true
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh
+      try:
+        - apply:
+            file: 30-list-objects-job.yaml
+        - script:
+            timeout: 150s
+            content: |
+              set -eu
+              if ! kubectl wait --for=condition=Complete job/itest-ch-ts-s3-list -n "$NAMESPACE" --timeout=120s; then
+                kubectl logs -n "$NAMESPACE" job/itest-ch-ts-s3-list >&2 || true
+                exit 1
+              fi
+              kubectl logs -n "$NAMESPACE" job/itest-ch-ts-s3-list
+
+    - name: scenario-d-readable-after-restart
+      catch:
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh
+      try:
+        - script:
+            timeout: 600s
+            content: |
+              set -eu
+              PW=$(kubectl get secret itest-ch-ts-credentials -n "$NAMESPACE" -o jsonpath='{.data.password}' | base64 -d)
+              OLD=$(kubectl get pods -n "$NAMESPACE" -l clickhouse.altinity.com/chi=itest-ch-ts -o jsonpath='{.items[0].metadata.name}')
+              OLD_UID=$(kubectl get pod "$OLD" -n "$NAMESPACE" -o jsonpath='{.metadata.uid}')
+              kubectl delete pod "$OLD" -n "$NAMESPACE" --wait=true --timeout=180s
+              i=0
+              POD=""
+              while [ "$i" -lt 60 ]; do
+                POD=$(kubectl get pods -n "$NAMESPACE" -l clickhouse.altinity.com/chi=itest-ch-ts -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+                if [ -n "$POD" ] && [ "$(kubectl get pod "$POD" -n "$NAMESPACE" -o jsonpath='{.metadata.uid}')" != "$OLD_UID" ] \
+                   && kubectl wait --for=condition=Ready pod/"$POD" -n "$NAMESPACE" --timeout=5s >/dev/null 2>&1; then
+                  break
+                fi
+                i=$((i + 1))
+                sleep 5
+              done
+              ch() { kubectl exec -n "$NAMESPACE" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q "$1"; }
+              i=0
+              count=""
+              while [ "$i" -lt 30 ]; do
+                count=$(ch "SELECT count() FROM default.t" 2>/dev/null || true)
+                [ "$count" = "150" ] && break
+                i=$((i + 1))
+                sleep 2
+              done
+              [ "$count" = "150" ] || { echo "expected 150 rows after restart, got: $count" >&2; exit 1; }
+      finally:
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh

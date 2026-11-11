@@ -83,6 +83,9 @@ type backupStorageConfigS3 struct {
 	SecretKey               string `json:"secret_key"`
 	ForcePathStyle          bool   `json:"force_path_style"`
 	DisableCertVerification bool   `json:"disable_cert_verification"`
+	// ObjectDiskPath is required by clickhouse-backup to back up parts that
+	// live on S3 disks (cold storage); it copies them under this prefix.
+	ObjectDiskPath string `json:"object_disk_path,omitempty"`
 }
 
 // ensureBackupInfra reconciles the storage Secret and auto-backup credentials
@@ -154,6 +157,9 @@ func ensureBackupInfra(c *controller.Context) error {
 			ForcePathStyle:          forcePathStyle,
 			DisableCertVerification: disableCertVerification,
 		},
+	}
+	if coldStorageParams(c) != nil {
+		cfg.S3.ObjectDiskPath = objectDiskPath
 	}
 	yamlData, err := yaml.Marshal(cfg)
 	if err != nil {

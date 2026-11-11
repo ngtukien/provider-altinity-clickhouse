@@ -1,0 +1,26 @@
+apiVersion: core.openeverest.io/v1alpha1
+kind: Instance
+metadata:
+  name: itest-ch-ts
+  namespace: default
+spec:
+  providerRef:
+    name: altinity-clickhouse
+  topology:
+    type: standalone
+  components:
+    engine:
+      type: clickhouse
+      replicas: 1
+      resources:
+        # The lab has 6 worker CPUs; keep requests small.
+        requests:
+          cpu: 250m
+        limits:
+          cpu: "1"
+          memory: 2G
+      storage:
+        size: 10Gi
+      parameters:
+        coldStorage:
+          storageRef: itest-ch-ts-storage

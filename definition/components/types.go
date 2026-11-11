@@ -51,6 +51,11 @@ type ClickHouseParameters struct {
 	// fails with MEMORY_LIMIT_EXCEEDED or TIMEOUT_EXCEEDED instead of the pod
 	// being OOM-killed. Applied with defaults when omitted.
 	QueryLimits *QueryLimitsParameters `json:"queryLimits,omitempty"`
+	// ColdStorage adds an S3 disk and a storage policy "tiered" (volumes "hot"
+	// on the data volume, "cold" on S3) for tables that opt in with
+	// `SETTINGS storage_policy = 'tiered'` and move old data with
+	// `TTL ... TO VOLUME 'cold'`. The default policy is unchanged.
+	ColdStorage *ColdStorageParameters `json:"coldStorage,omitempty"`
 }
 
 // QueryLimitsParameters configures the server memory budget and the settings
@@ -75,6 +80,17 @@ type QueryLimitsParameters struct {
 	// SpillToDisk lets GROUP BY and ORDER BY write to disk once they use half
 	// of MaxMemoryUsage instead of failing. One of "enabled" (default) or "disabled".
 	SpillToDisk string `json:"spillToDisk,omitempty"`
+}
+
+// ColdStorageParameters configures the S3 tier of the "tiered" storage policy.
+type ColdStorageParameters struct {
+	// StorageRef names a BackupStorage (backup.openeverest.io) in the
+	// Instance's namespace whose S3 bucket, endpoint and credentials hold the
+	// cold data, under <namespace>/<instance>/cold/.
+	StorageRef string `json:"storageRef"`
+	// CachePercent is the share of the engine's storage size used as a local
+	// read cache for cold data, from 1 to 50. Default 10.
+	CachePercent int `json:"cachePercent,omitempty"`
 }
 
 // TLSParameters configures TLS for client connections to ClickHouse.

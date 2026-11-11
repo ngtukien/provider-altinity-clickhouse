@@ -250,6 +250,20 @@ func TestValidate(t *testing.T) {
 			want:    []string{"spec.components[engine].parameters.queryLimits.maxMemoryUsage"},
 		},
 		{
+			name:    "cold storage",
+			fixture: standaloneFixture,
+			mutate:  engineParameters(`{"coldStorage":{"storageRef":"lake","cachePercent":20}}`),
+		},
+		{
+			name:    "cold storage without a storage and with an oversized cache",
+			fixture: standaloneFixture,
+			mutate:  engineParameters(`{"coldStorage":{"storageRef":" ","cachePercent":80}}`),
+			want: []string{
+				"spec.components[engine].parameters.coldStorage.storageRef",
+				"spec.components[engine].parameters.coldStorage.cachePercent",
+			},
+		},
+		{
 			name:    "unknown engine parameter",
 			fixture: standaloneFixture,
 			mutate:  engineParameters(`{"podmonitor":"enabled"}`),
