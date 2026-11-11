@@ -784,6 +784,41 @@ spec:
   cluster default.
 - Keeper pods report under `keeper` in the Instance's `status.components`.
 
+### Querying a sharded cluster
+
+The client Service `clickhouse-<name>` serves HTTP on `8123` and the native protocol on
+`9000`, plus `8443` and `9440` with TLS (only those two when TLS is `required`, see
+[TLS](#tls)). It selects every ready ClickHouse pod of the Instance, across all shards:
+unexposed it is headless, so its DNS name resolves to all of them; with a `serviceType`
+(ClusterIP, LoadBalancer, NodePort) Kubernetes balances each connection to one of them.
+
+A connection therefore lands on one pod, of one shard. A local `MergeTree` or
+`ReplicatedMergeTree` table only holds that shard's rows, so reads and writes that span
+the cluster go through a `Distributed` table. The ClickHouse cluster is named
+`clickhouse`; the operator sets the `{cluster}`, `{shard}` and `{replica}` macros:
+
+```sql
+-- the shard-local table, one copy per replica of each shard
+CREATE TABLE events ON CLUSTER '{cluster}' (ts DateTime, id UInt64, v String)
+ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/events', '{replica}')
+ORDER BY (ts, id);
+
+-- the cluster-wide view: inserts are spread over the shards, selects read all of them
+CREATE TABLE events_dist ON CLUSTER '{cluster}' AS events
+ENGINE = Distributed('{cluster}', default, events, rand());
+
+INSERT INTO events_dist VALUES (now(), 1, 'a'), (now(), 2, 'b');
+SELECT count() FROM events_dist;
+```
+
+Replace `rand()` with a key such as `cityHash64(id)` to keep the rows of one key on one shard.
+
+The provider adds no query proxy: `Distributed` tables are what routes queries across
+shards, and for the native protocol a TCP proxy would only repeat the Service's balancing.
+[chproxy](https://github.com/ContentSquare/chproxy) speaks HTTP only; it can be run in
+front of the HTTP port for result caching or per-user limits, but it is not part of the
+provider.
+
 ## Versions
 
 <!-- BEGIN GENERATED: versions -->
