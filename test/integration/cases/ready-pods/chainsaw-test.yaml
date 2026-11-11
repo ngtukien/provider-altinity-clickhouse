@@ -1,0 +1,113 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: ready-pods
+spec:
+  description: |
+    The Instance must not report Ready while a ClickHouse pod is not running.
+    a. A sharded Instance (2 shards) becomes Ready with both ClickHouse pods Ready.
+    b. Raising the engine CPU request beyond what a node can hold leaves a pod Pending;
+       the Instance must stay out of Ready while it is Pending.
+    c. Lowering the request again brings the Instance back to Ready.
+  catch:
+    - script:
+        content: |
+          kubectl -n "$NAMESPACE" get instance,chi,chk,pod -o wide | grep -E '(NAME|itest-ch-rp)' || true
+    - script:
+        content: |
+          kubectl logs -n everest-system -l app.kubernetes.io/name=provider-altinity-clickhouse --tail=100 || true
+  steps:
+    - name: scenario-a-ready-with-all-pods
+      catch:
+        - script:
+            content: kubectl -n "$NAMESPACE" describe instance/itest-ch-rp || true
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh
+      try:
+        - apply:
+            file: 10-create-instance.yaml
+        - assert:
+            file: 10-assert-instance.yaml
+            timeout: 20m
+        - script:
+            timeout: 60s
+            content: |
+              set -eu
+              ready=$(kubectl get pods -n "$NAMESPACE" -l clickhouse.altinity.com/chi=itest-ch-rp \
+                -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | grep -c '^True$' || true)
+              echo "ready ClickHouse pods: $ready"
+              [ "$ready" = "2" ] || { echo "expected 2 ready ClickHouse pods, got $ready" >&2; exit 1; }
+    - name: scenario-b-not-ready-while-pending
+      catch:
+        - script:
+            content: kubectl -n "$NAMESPACE" describe instance/itest-ch-rp || true
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh
+      try:
+        - script:
+            timeout: 16m
+            content: |
+              set -eu
+              # No lab node can hold 1900m on top of what it already runs, so a rolled pod stays Pending.
+              kubectl patch instance.core.openeverest.io itest-ch-rp -n "$NAMESPACE" --type=merge \
+                -p '{"spec":{"components":{"engine":{"resources":{"requests":{"cpu":"1900m"},"limits":{"cpu":"2","memory":"2G"}}}}}}'
+              seen=0
+              i=0
+              while [ "$i" -lt 90 ]; do
+                phase=$(kubectl get instance.core.openeverest.io itest-ch-rp -n "$NAMESPACE" -o jsonpath='{.status.phase}')
+                msg=$(kubectl get instance.core.openeverest.io itest-ch-rp -n "$NAMESPACE" -o jsonpath='{.status.message}')
+                pending=$(kubectl get pods -n "$NAMESPACE" -l clickhouse.altinity.com/chi=itest-ch-rp \
+                  --field-selector=status.phase=Pending -o name | wc -l)
+                echo "sample $i: phase=$phase pending=$pending message=$msg"
+                if [ "$pending" -gt 0 ] && [ "$phase" = "Ready" ]; then
+                  echo "Instance reports Ready while $pending ClickHouse pod(s) are Pending" >&2
+                  exit 1
+                fi
+                if [ "$pending" -gt 0 ]; then
+                  seen=$((seen + 1))
+                else
+                  seen=0
+                fi
+                if [ "$seen" -ge 3 ]; then
+                  case "$msg" in
+                    *"Waiting for ClickHouse pods"*) echo "observed: provider pod check ($msg)" ;;
+                    *) echo "observed: operator in-progress status ($msg)" ;;
+                  esac
+                  exit 0
+                fi
+                i=$((i + 1))
+                sleep 10
+              done
+              echo "never saw 3 consecutive samples with a Pending ClickHouse pod" >&2
+              exit 1
+    - name: scenario-c-ready-again
+      catch:
+        - script:
+            content: kubectl -n "$NAMESPACE" describe instance/itest-ch-rp || true
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh
+      try:
+        - script:
+            timeout: 60s
+            content: |
+              set -eu
+              kubectl patch instance.core.openeverest.io itest-ch-rp -n "$NAMESPACE" --type=merge \
+                -p '{"spec":{"components":{"engine":{"resources":{"requests":{"cpu":"250m"},"limits":{"cpu":"1","memory":"2G"}}}}}}'
+        - assert:
+            file: 10-assert-instance.yaml
+            timeout: 20m
+        - script:
+            timeout: 60s
+            content: |
+              set -eu
+              ready=$(kubectl get pods -n "$NAMESPACE" -l clickhouse.altinity.com/chi=itest-ch-rp \
+                -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | grep -c '^True$' || true)
+              echo "ready ClickHouse pods: $ready"
+              [ "$ready" = "2" ] || { echo "expected 2 ready ClickHouse pods, got $ready" >&2; exit 1; }
+      finally:
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh

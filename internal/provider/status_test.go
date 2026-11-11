@@ -15,6 +15,7 @@
 package provider
 
 import (
+	"fmt"
 	"testing"
 
 	chkv1 "github.com/altinity/clickhouse-operator/pkg/apis/clickhouse-keeper.altinity.com/v1"
@@ -27,6 +28,8 @@ import (
 
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
+
+	"github.com/openeverest/provider-altinity-clickhouse/internal/common"
 )
 
 type operatorState struct {
@@ -83,8 +86,12 @@ func TestStatus(t *testing.T) {
 			corev1alpha1.InstancePhaseProvisioning, "Creating ClickHouse", false},
 		{"first reconcile running", standalone, []client.Object{chiIn(creating)},
 			corev1alpha1.InstancePhaseProvisioning, "Creating ClickHouse: 1 of 2 hosts ready", false},
-		{"ready", standalone, []client.Object{chiIn(completed)},
+		{"ready", standalone, append([]client.Object{chiIn(completed)}, clickhousePods(2, 2)...),
 			corev1alpha1.InstancePhaseReady, "", true},
+		{"completed but a host never started", standalone, append([]client.Object{chiIn(completed)}, clickhousePods(2, 1)...),
+			corev1alpha1.InstancePhaseUpdating, "Waiting for ClickHouse pods: 1 of 2 ready", true},
+		{"completed with a ready pod being deleted", standalone, append([]client.Object{chiIn(completed), terminatingPod()}, clickhousePods(1, 1)...),
+			corev1alpha1.InstancePhaseUpdating, "Waiting for ClickHouse pods: 1 of 2 ready", true},
 		{"update of a ready cluster", standalone, []client.Object{chiIn(updating)},
 			corev1alpha1.InstancePhaseUpdating, "Updating ClickHouse: 1 of 2 hosts ready", true},
 		{"operator aborted", standalone, []client.Object{chiIn(aborted)},
@@ -104,12 +111,12 @@ func TestStatus(t *testing.T) {
 			corev1alpha1.InstancePhaseUpdating, "Creating ClickHouse Keeper", true},
 		{"replicated: keeper aborted", replicated, []client.Object{chkIn(aborted), chiIn(completed)},
 			corev1alpha1.InstancePhaseFailed, "ClickHouse Keeper: Update Service failed", false},
-		{"replicated: ready", replicated, []client.Object{chkIn(completed), chiIn(completed)},
+		{"replicated: ready", replicated, append([]client.Object{chkIn(completed), chiIn(completed)}, clickhousePods(2, 2)...),
 			corev1alpha1.InstancePhaseReady, "", true},
 
-		{"TLS certificate not issued yet", withTLS, []client.Object{chiIn(completed)},
+		{"TLS certificate not issued yet", withTLS, append([]client.Object{chiIn(completed)}, clickhousePods(2, 2)...),
 			corev1alpha1.InstancePhaseUpdating, "Waiting for the TLS certificate", true},
-		{"TLS certificate issued", withTLS, []client.Object{chiIn(completed), issuedCertificate()},
+		{"TLS certificate issued", withTLS, append([]client.Object{chiIn(completed), issuedCertificate()}, clickhousePods(2, 2)...),
 			corev1alpha1.InstancePhaseReady, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -119,6 +126,37 @@ func TestStatus(t *testing.T) {
 			assert.Equal(t, tc.message, st.Message)
 			assert.Equal(t, tc.conn, !st.ConnectionDetails.IsEmpty(), "connection details kept")
 		})
+	}
+}
+
+// clickhousePods returns n ClickHouse pods of Instance "db", the first ready of them Ready
+// and the rest Pending.
+func clickhousePods(n, ready int) []client.Object {
+	pods := make([]client.Object, 0, n)
+	for i := range n {
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Name: fmt.Sprintf("chi-db-clickhouse-%d-0-0", i), Namespace: "ns",
+			Labels: map[string]string{common.LabelCHIName: "db"},
+		}}
+		if i < ready {
+			pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+		} else {
+			pod.Status.Phase = corev1.PodPending
+		}
+		pods = append(pods, pod)
+	}
+	return pods
+}
+
+// terminatingPod is a Ready ClickHouse pod that is being deleted.
+func terminatingPod() *corev1.Pod {
+	now := metav1.Now()
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "chi-db-clickhouse-9-0-0", Namespace: "ns", Labels: map[string]string{common.LabelCHIName: "db"},
+			DeletionTimestamp: &now, Finalizers: []string{"test/keep"},
+		},
+		Status: corev1.PodStatus{Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
 	}
 }
 

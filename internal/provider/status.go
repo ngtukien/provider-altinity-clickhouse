@@ -19,11 +19,14 @@ import (
 
 	chkv1 "github.com/altinity/clickhouse-operator/pkg/apis/clickhouse-keeper.altinity.com/v1"
 	chiv1 "github.com/altinity/clickhouse-operator/pkg/apis/clickhouse.altinity.com/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
+
+	"github.com/openeverest/provider-altinity-clickhouse/internal/common"
 )
 
 // Status reports the Instance phase from the operator's view of the
@@ -77,6 +80,16 @@ func (p *Provider) Status(c *controller.Context) (controller.Status, error) {
 
 	if st, done := clickhouse.status(inProgress); !done {
 		return st, nil
+	}
+
+	// The operator marks a CHI Completed even when a host never started (e.g. a
+	// pod left Pending for lack of CPU), so check the pods themselves.
+	ready, err := readyClickHousePods(c)
+	if err != nil {
+		return controller.Status{}, err
+	}
+	if ready < clickhouse.hosts {
+		return inProgress(fmt.Sprintf("Waiting for ClickHouse pods: %d of %d ready", ready, clickhouse.hosts)), nil
 	}
 
 	if tlsEnabled(c) {
@@ -163,6 +176,30 @@ func (i installation) status(inProgress func(string) controller.Status) (st cont
 		message = fmt.Sprintf("%s: %d of %d hosts ready", message, i.hostsCompleted, i.hosts)
 	}
 	return inProgress(message), false
+}
+
+// readyClickHousePods counts the Instance's ClickHouse pods that are Ready and
+// not being deleted.
+func readyClickHousePods(c *controller.Context) (int, error) {
+	pods := &corev1.PodList{}
+	if err := c.Client().List(c.Context(), pods, client.InNamespace(c.Namespace()),
+		client.MatchingLabels{common.LabelCHIName: c.Name()}); err != nil {
+		return 0, fmt.Errorf("list ClickHouse pods: %w", err)
+	}
+	ready := 0
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if !pod.DeletionTimestamp.IsZero() {
+			continue
+		}
+		for _, cond := range pod.Status.Conditions {
+			if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
+				ready++
+				break
+			}
+		}
+	}
+	return ready, nil
 }
 
 // getOptional reads the named object, reporting whether it exists.
