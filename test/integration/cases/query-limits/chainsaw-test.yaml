@@ -1,0 +1,115 @@
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: query-limits
+spec:
+  description: |
+    End-to-end verification of engine.parameters.queryLimits (OOM protection):
+    a. limits rendered: per-query max_memory_usage 512Mi, server budget 80% of the 2G limit;
+    b. a memory-heavy query fails with MEMORY_LIMIT_EXCEEDED and the pod is not restarted;
+    c. a GROUP BY above max_memory_usage fails without spilling and succeeds with the default spill;
+    d. the readonly profile: INSERT refused, raising max_memory_usage refused, long query cancelled.
+  catch:
+    - script:
+        content: |
+          kubectl -n "$NAMESPACE" get instance,chi,pod -o wide || true
+    - script:
+        content: |
+          kubectl logs -n everest-system -l app.kubernetes.io/name=provider-altinity-clickhouse --tail=100 || true
+  steps:
+    - name: scenario-a-limits-rendered
+      catch:
+        - script:
+            content: kubectl -n "$NAMESPACE" describe instance/itest-ch-ql || true
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh
+      try:
+        - apply:
+            file: 10-create-instance.yaml
+        - assert:
+            file: 10-assert-instance.yaml
+        - script:
+            timeout: 120s
+            content: |
+              set -eu
+              . ./lib.sh
+              i=0
+              until admin "SELECT 1" >/dev/null; do
+                i=$((i + 1))
+                if [ "$i" -ge 30 ]; then echo "timed out waiting for ClickHouse to accept connections" >&2; cat "$ERR" >&2; exit 1; fi
+                sleep 2
+              done
+              got=$(admin "SELECT getSetting('max_memory_usage')")
+              [ "$got" = "536870912" ] || { echo "max_memory_usage: expected 536870912, got $got" >&2; exit 1; }
+              got=$(admin "SELECT value FROM system.server_settings WHERE name = 'max_server_memory_usage'")
+              # 80% of the 2G memory limit (2000000000 bytes).
+              [ "$got" = "1600000000" ] || { echo "max_server_memory_usage: expected 1600000000, got $got" >&2; exit 1; }
+              echo "limits rendered as expected"
+
+    - name: scenario-b-memory-limit-no-oom
+      catch:
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh
+      try:
+        - script:
+            timeout: 180s
+            content: |
+              set -eu
+              . ./lib.sh
+              before=$(restarts)
+              # 200M UInt64 in one array needs ~1.6 GB, far above the 512Mi per-query limit.
+              expect_code 241 admin "$PW" "SELECT length(groupArray(number)) FROM numbers(200000000)"
+              sleep 10
+              after=$(restarts)
+              [ "$after" = "$before" ] || { echo "clickhouse container restarted: restartCount $before -> $after" >&2; exit 1; }
+              phase=$(kubectl get instances.core.openeverest.io "$NAME" -n "$NS" -o jsonpath='{.status.phase}')
+              [ "$phase" = "Ready" ] || { echo "Instance phase after the query: $phase" >&2; exit 1; }
+              echo "query cancelled, pod kept running (restartCount $after)"
+
+    - name: scenario-c-group-by-spills
+      catch:
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh
+      try:
+        - script:
+            timeout: 600s
+            content: |
+              set -eu
+              . ./lib.sh
+              q="SELECT number % 30000000 AS k, count() FROM numbers(60000000) GROUP BY k"
+              # Without spilling the 30M-key hash table exceeds 512Mi ...
+              expect_code 241 admin "$PW" "$q SETTINGS max_bytes_before_external_group_by = 0 FORMAT Null"
+              # ... with the profile's default spill threshold it completes.
+              admin "$q FORMAT Null" >/dev/null || { echo "GROUP BY with spilling failed:" >&2; cat "$ERR" >&2; exit 1; }
+              echo "GROUP BY spilled to disk and completed"
+
+    - name: scenario-d-readonly-profile
+      catch:
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh
+      try:
+        - script:
+            timeout: 180s
+            content: |
+              set -eu
+              . ./lib.sh
+              BIPW=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+              admin "CREATE TABLE IF NOT EXISTS default.itest_ql (id UInt64) ENGINE = MergeTree ORDER BY id"
+              admin "CREATE OR REPLACE USER itest_bi IDENTIFIED WITH sha256_password BY '$BIPW' SETTINGS PROFILE 'readonly'"
+              admin "GRANT SELECT ON *.* TO itest_bi"
+              # INSERT is granted, so only readonly=2 can refuse it.
+              admin "GRANT INSERT ON default.itest_ql TO itest_bi"
+              expect_code 164 itest_bi "$BIPW" "INSERT INTO default.itest_ql VALUES (1)"
+              expect_code 452 itest_bi "$BIPW" "SET max_memory_usage = 10000000000"
+              # Unbounded scan: cancelled by the readonly profile's 5 s max_execution_time.
+              expect_code 159 itest_bi "$BIPW" "SELECT count() FROM system.numbers WHERE sipHash64(number) = 0"
+              admin "SELECT 1" >/dev/null
+              echo "readonly profile enforced"
+      finally:
+        - script:
+            timeout: 10m
+            content: bash ./teardown.sh
