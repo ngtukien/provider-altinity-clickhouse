@@ -295,6 +295,9 @@ func applyAndWaitForCHI(c *controller.Context, gate *rolloutGate, chi *chiv1.Cli
 	if err := reconcilePlaintextPolicy(c, current); err != nil {
 		return err
 	}
+	if err := reconcileExternalAccess(c); err != nil {
+		return err
+	}
 	if err := waitForCHI(c, current); err != nil {
 		return err
 	}

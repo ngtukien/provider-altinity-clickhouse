@@ -126,9 +126,9 @@ ui:
             - memory
             - disk
 
-    # dbaas: form cho khách chỉ giữ version, tài nguyên và TLS. Monitoring, StorageClass, chính sách giữ dữ
-    # liệu, kiểu Service và config tự do là việc của platform: bỏ khỏi form, provider dùng mặc định
-    # (không PodMonitor, StorageClass mặc định, Retain, ClusterIP, không config thêm).
+    # dbaas: form cho khách giữ version, tài nguyên, TLS và mạng. Monitoring, StorageClass, chính sách giữ dữ
+    # liệu và config tự do là việc của platform: bỏ khỏi form, provider dùng mặc định
+    # (không PodMonitor, StorageClass mặc định, Retain, không config thêm).
     security:
       label: "Security"
       description: "Encrypt client connections."
@@ -148,8 +148,33 @@ ui:
       componentsOrder:
         - tls
 
+    # dbaas: khách chỉ chọn mở ra ngoài cụm hay không; mọi giao thức đều mở. network.* (giao thức, nguồn) vẫn
+    # khai được qua YAML/API.
+    network:
+      label: "Network"
+      description: "Choose whether clients outside the cluster can connect."
+      components:
+        serviceType:
+          uiType: select
+          path: spec.components.engine.service.serviceType
+          fieldParams:
+            label: "Exposure"
+            helperText: "NodePort: reachable from outside the cluster, by name (HTTPS 443, native TLS 9440) or on <node IP>:<node port>; see the connection details. ClusterIP: in-cluster only. Every protocol is open. Fixed after creation."
+            defaultValue: "NodePort"
+            options:
+              - label: "NodePort (outside the cluster)"
+                value: "NodePort"
+              - label: "ClusterIP (in-cluster only)"
+                value: "ClusterIP"
+            modes:
+              edit:
+                disabled: true
+      componentsOrder:
+        - serviceType
+
   sectionsOrder:
     - databaseVersion
     - scaling
     - resources
     - security
+    - network

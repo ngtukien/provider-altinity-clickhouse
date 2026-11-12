@@ -50,6 +50,9 @@ package provider
 // NetworkPolicy limiting the plaintext ClickHouse ports when TLS is required
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 
+// Ingresses making exposed Instances reachable by name (CLICKHOUSE_EXTERNAL_DOMAIN)
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
+
 // Core Kubernetes resources managed by the Altinity operator on our behalf
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete

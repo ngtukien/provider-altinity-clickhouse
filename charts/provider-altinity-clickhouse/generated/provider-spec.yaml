@@ -246,6 +246,27 @@ spec:
                 required: true
           description: Select the ClickHouse version to deploy.
           label: Database Version
+        network:
+          components:
+            serviceType:
+              fieldParams:
+                defaultValue: NodePort
+                helperText: 'NodePort: reachable from outside the cluster, by name (HTTPS 443, native TLS 9440) or on <node IP>:<node port>; see the connection details. ClusterIP: in-cluster only. Every protocol is open. Fixed after creation.'
+                label: Exposure
+                modes:
+                  edit:
+                    disabled: true
+                options:
+                  - label: NodePort (outside the cluster)
+                    value: NodePort
+                  - label: ClusterIP (in-cluster only)
+                    value: ClusterIP
+              path: spec.components.engine.service.serviceType
+              uiType: select
+          componentsOrder:
+            - serviceType
+          description: Choose whether clients outside the cluster can connect.
+          label: Network
         resources:
           components:
             compute:
@@ -337,6 +358,7 @@ spec:
         - scaling
         - resources
         - security
+        - network
     sharded:
       sections:
         databaseVersion:
@@ -356,6 +378,27 @@ spec:
                 required: true
           description: Select the ClickHouse version to deploy.
           label: Database Version
+        network:
+          components:
+            serviceType:
+              fieldParams:
+                defaultValue: NodePort
+                helperText: 'NodePort: reachable from outside the cluster, by name (HTTPS 443, native TLS 9440) or on <node IP>:<node port>; see the connection details. ClusterIP: in-cluster only. Every protocol is open. Fixed after creation.'
+                label: Exposure
+                modes:
+                  edit:
+                    disabled: true
+                options:
+                  - label: NodePort (outside the cluster)
+                    value: NodePort
+                  - label: ClusterIP (in-cluster only)
+                    value: ClusterIP
+              path: spec.components.engine.service.serviceType
+              uiType: select
+          componentsOrder:
+            - serviceType
+          description: Choose whether clients outside the cluster can connect.
+          label: Network
         resources:
           components:
             compute:
@@ -471,6 +514,7 @@ spec:
         - scaling
         - resources
         - security
+        - network
     standalone:
       sections:
         databaseVersion:
@@ -490,6 +534,27 @@ spec:
                 required: true
           description: Select the ClickHouse version to deploy.
           label: Database Version
+        network:
+          components:
+            serviceType:
+              fieldParams:
+                defaultValue: NodePort
+                helperText: 'NodePort: reachable from outside the cluster, by name (HTTPS 443, native TLS 9440) or on <node IP>:<node port>; see the connection details. ClusterIP: in-cluster only. Every protocol is open. Fixed after creation.'
+                label: Exposure
+                modes:
+                  edit:
+                    disabled: true
+                options:
+                  - label: NodePort (outside the cluster)
+                    value: NodePort
+                  - label: ClusterIP (in-cluster only)
+                    value: ClusterIP
+              path: spec.components.engine.service.serviceType
+              uiType: select
+          componentsOrder:
+            - serviceType
+          description: Choose whether clients outside the cluster can connect.
+          label: Network
         resources:
           components:
             compute:
@@ -563,6 +628,7 @@ spec:
         - databaseVersion
         - resources
         - security
+        - network
   versions:
     - components:
         engine: 26.8.31.2

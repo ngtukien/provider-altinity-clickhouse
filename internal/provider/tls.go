@@ -334,10 +334,13 @@ func trimCRName(name string) string {
 // externalAddresses returns the LoadBalancer hostnames and IPs of the client
 // Service, so clients outside the cluster can verify the certificate too.
 func externalAddresses(c *controller.Context) (names, ips []string, err error) {
+	if host := externalHost(c); host != "" {
+		names = append(names, host)
+	}
 	svc := &corev1.Service{}
 	found, err := getOptional(c, svc, clientServiceName(c.Name()))
 	if err != nil || !found || svc.Spec.Type != corev1.ServiceTypeLoadBalancer {
-		return nil, nil, err
+		return names, nil, err
 	}
 	for _, ingress := range svc.Status.LoadBalancer.Ingress {
 		if ingress.Hostname != "" {

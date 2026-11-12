@@ -247,6 +247,10 @@ const (
 	// ConnectionKeyInternalHost is the in-cluster address, which differs from
 	// host when the Instance is exposed through a LoadBalancer.
 	ConnectionKeyInternalHost = "internal_host"
+
+	// ConnectionKeyExternalHost is <name>.<domain> when the Instance is
+	// reachable by name (HTTPS on 443, native TLS on 9440).
+	ConnectionKeyExternalHost = "external_host"
 	// The ports clients may use, for the TLS mode, on either host.
 	ConnectionKeyHTTPPort         = "http_port"
 	ConnectionKeyHTTPSPort        = "https_port"
@@ -261,6 +265,13 @@ const (
 	// chart sets both; the namespace defaults to the provider's own.
 	EnvOperatorNamespace = "CLICKHOUSE_OPERATOR_NAMESPACE"
 	EnvOperatorPodLabels = "CLICKHOUSE_OPERATOR_POD_LABELS"
+
+	// EnvExternalDomain makes exposed Instances reachable as <name>.<domain>
+	// through Ingresses of class EnvIngressClass; EnvIngressClusterIssuer
+	// issues their HTTPS certificates (see reconcileExternalAccess).
+	EnvExternalDomain       = "CLICKHOUSE_EXTERNAL_DOMAIN"
+	EnvIngressClass         = "CLICKHOUSE_INGRESS_CLASS"
+	EnvIngressClusterIssuer = "CLICKHOUSE_INGRESS_CLUSTER_ISSUER"
 
 	// DefaultOperatorPodLabels selects the operator the chart bundles.
 	DefaultOperatorPodLabels = "app.kubernetes.io/name=operator"
