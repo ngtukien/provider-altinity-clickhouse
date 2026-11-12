@@ -307,7 +307,7 @@ spec:
             cidrs: "10.0.5.0/24"
 ```
 
-- The form's Network section edits the same fields.
+- The form's Network section only chooses the exposure (NodePort or ClusterIP); these fields are YAML/API only.
 - The ports follow the TLS mode: `http` is 8123 or 8443, `native` 9000 or 9440. The
   Service and the connection details carry the open protocols only.
 - The Instance's own pods (replication, distributed queries) and the operator reach
