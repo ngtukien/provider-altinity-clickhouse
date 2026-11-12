@@ -741,6 +741,7 @@ Unsupported operations:
 |---|---|---|
 | `standalone` | ✅ | Single ClickHouse node, no coordination dependency |
 | `replicated` | | Multi-replica ClickHouse (minimum 2) with an automatically provisioned ClickHouse Keeper quorum |
+| `sharded` | | ClickHouse split into shards (minimum 2), each with one or more replicas, coordinated by the same Keeper quorum |
 <!-- END GENERATED: topologies -->
 
 The `replicated` topology provisions a `ClickHouseKeeperInstallation` first and waits for the
@@ -786,11 +787,22 @@ spec:
 
 ### Querying a sharded cluster
 
+The `sharded` topology sets the shard count with `spec.topology.parameters.shards` (at
+least 2, default 2) and the replicas of each shard with `spec.components.engine.replicas`;
+it always declares a `keeper` component. Shards can be added later but not removed, and
+existing data is not rebalanced onto new shards.
+
 The client Service `clickhouse-<name>` serves HTTP on `8123` and the native protocol on
 `9000`, plus `8443` and `9440` with TLS (only those two when TLS is `required`, see
 [TLS](#tls)). It selects every ready ClickHouse pod of the Instance, across all shards:
 unexposed it is headless, so its DNS name resolves to all of them; with a `serviceType`
 (ClusterIP, LoadBalancer, NodePort) Kubernetes balances each connection to one of them.
+
+Which port a client needs depends on its protocol, not on the URI scheme: `clickhouse-client`,
+`clickhouse-go` (`clickhouse://host:9000`) and `clickhouse-driver` use the native port
+(`9000`, `9440` with TLS); `curl`, Grafana, Superset, Metabase, `clickhouse-connect` and the
+official JDBC driver use HTTP (`8123`, `8443` with TLS), even though a JDBC URL reads
+`jdbc:clickhouse://host:8123`.
 
 A connection therefore lands on one pod, of one shard. A local `MergeTree` or
 `ReplicatedMergeTree` table only holds that shard's rows, so reads and writes that span
