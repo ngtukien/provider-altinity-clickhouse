@@ -108,6 +108,12 @@ provider:
 
 # -- Additional environment variables to set on the provider container
 extraEnv: []
+
+# -- The platform has a load balancer (e.g. MetalLB): the Instance form offers the LoadBalancer exposure, each
+# Instance getting its own address on the standard ports, with an "Allowed IPs" field for its source ranges.
+# Leave false where Services of type LoadBalancer stay pending (the provider then rejects them).
+loadBalancer:
+  enabled: false
 # - name: MY_VAR
 #   value: "my-value"
 

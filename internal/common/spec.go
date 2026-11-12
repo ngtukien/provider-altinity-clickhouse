@@ -273,6 +273,10 @@ const (
 	EnvIngressClass         = "CLICKHOUSE_INGRESS_CLASS"
 	EnvIngressClusterIssuer = "CLICKHOUSE_INGRESS_CLUSTER_ISSUER"
 
+	// EnvLoadBalancerEnabled is "true" where the cluster has a load balancer
+	// (e.g. MetalLB): only then is the LoadBalancer exposure accepted.
+	EnvLoadBalancerEnabled = "CLICKHOUSE_LOAD_BALANCER_ENABLED"
+
 	// DefaultOperatorPodLabels selects the operator the chart bundles.
 	DefaultOperatorPodLabels = "app.kubernetes.io/name=operator"
 

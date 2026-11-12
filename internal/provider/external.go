@@ -16,20 +16,25 @@ package provider
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
+	"github.com/openeverest/provider-altinity-clickhouse/definition/components"
 	"github.com/openeverest/provider-altinity-clickhouse/internal/common"
 )
 
 // External access by name: with CLICKHOUSE_EXTERNAL_DOMAIN set, an Instance
-// exposed outside the cluster (NodePort or LoadBalancer) is also reachable as
+// exposed through a NodePort is also reachable as
 // <name>.<domain> through the cluster's Ingress controller, on standard ports:
 //
 //   - HTTP: https://<name>.<domain> (443), TLS ended at the Ingress with a
@@ -53,15 +58,71 @@ const (
 )
 
 // externalHost returns <name>.<domain>, or "" when the provider has no domain
-// or the Instance is not exposed outside the cluster.
+// or the Instance is not exposed through a NodePort. A LoadBalancer has its own
+// address, limited by its source ranges, which the shared Ingress would bypass.
 func externalHost(c *controller.Context) string {
 	domain := os.Getenv(common.EnvExternalDomain)
 	service := c.Instance().Spec.Components[common.ComponentEngine].Service
-	if domain == "" || service == nil ||
-		(service.ServiceType != corev1.ServiceTypeNodePort && service.ServiceType != corev1.ServiceTypeLoadBalancer) {
+	if domain == "" || service == nil || service.ServiceType != corev1.ServiceTypeNodePort {
 		return ""
 	}
 	return c.Name() + "." + domain
+}
+
+// exposedService returns the engine's Service, with the loadBalancerSourceRanges
+// parameter as its source ranges when it is a LoadBalancer that sets none.
+func exposedService(c *controller.Context) *corev1alpha1.Service {
+	engine := c.Instance().Spec.Components[common.ComponentEngine]
+	service := engine.Service
+	if service == nil || service.ServiceType != corev1.ServiceTypeLoadBalancer ||
+		(service.LoadBalancerService != nil && len(service.LoadBalancerService.SourceRanges) > 0) {
+		return service
+	}
+	var params components.ClickHouseParameters
+	_ = c.TryDecodeComponentParameters(engine, &params)
+	ranges := splitList(params.LoadBalancerSourceRanges)
+	if len(ranges) == 0 {
+		return service
+	}
+	out := service.DeepCopy()
+	out.LoadBalancerService = &corev1alpha1.LoadBalancerService{SourceRanges: ranges}
+	return out
+}
+
+// loadBalancerEnabled reports whether the platform offers the LoadBalancer exposure.
+func loadBalancerEnabled() bool {
+	return os.Getenv(common.EnvLoadBalancerEnabled) == "true"
+}
+
+// splitList returns the non-empty, trimmed items of a comma-separated list.
+func splitList(s string) []string {
+	var out []string
+	for _, item := range strings.Split(s, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+// validateExposure rejects a LoadBalancer where the platform has none, which
+// would leave the Service pending, and malformed source ranges.
+func validateExposure(enginePath *field.Path, service *corev1alpha1.Service, sourceRanges string) field.ErrorList {
+	var errs field.ErrorList
+	if service != nil && service.ServiceType == corev1.ServiceTypeLoadBalancer && !loadBalancerEnabled() {
+		errs = append(errs, field.Forbidden(enginePath.Child("service", "serviceType"),
+			"this cluster has no load balancer; use NodePort to reach the Instance from outside the cluster"))
+	}
+	for _, cidr := range splitList(sourceRanges) {
+		prefix, err := netip.ParsePrefix(cidr)
+		switch {
+		case err != nil:
+			errs = append(errs, field.Invalid(enginePath.Child("parameters", "loadBalancerSourceRanges"), cidr, "must be a CIDR such as 203.0.113.0/24"))
+		case prefix.Masked() != prefix:
+			errs = append(errs, field.Invalid(enginePath.Child("parameters", "loadBalancerSourceRanges"), cidr, "must not have host bits set; use "+prefix.Masked().String()))
+		}
+	}
+	return errs
 }
 
 // reconcileExternalAccess applies the Service and Ingresses that make the
