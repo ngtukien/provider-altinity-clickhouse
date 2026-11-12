@@ -78,12 +78,6 @@ func TestExternalAccess(t *testing.T) {
 	names, _, err := externalAddresses(c)
 	require.NoError(t, err)
 	assert.Contains(t, names, "db.clickhouse.example.com", "the server certificate covers the name")
-
-	// Optional TLS, HTTP only: no native Ingress.
-	c = newTestContext(t, exposedInstance(`{"tls":{"enabled":"enabled","mode":"optional"},"network":{"protocols":"http"}}`, corev1.ServiceTypeNodePort))
-	require.NoError(t, reconcileExternalAccess(c))
-	assert.NotNil(t, externalIngressIn(t, c, externalHTTPSuffix))
-	assert.Nil(t, externalIngressIn(t, c, externalNativeSuffix))
 }
 
 func TestExternalAccessOnlyWhenExposedWithADomain(t *testing.T) {

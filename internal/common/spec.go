@@ -221,22 +221,13 @@ const (
 	KeeperSecurePort = 2281
 	KeeperRaftPort   = 9444
 
-	// ClientPolicySuffix names the NetworkPolicy limiting who reaches the
-	// ClickHouse ports (see NetworkParameters).
-	ClientPolicySuffix = "-client-access"
-
-	// PlaintextPolicySuffix named the NetworkPolicy ClientPolicySuffix
-	// replaces; it is deleted where an earlier version created it.
+	// PlaintextPolicySuffix is appended to the Instance name to form the
+	// NetworkPolicy that limits the plaintext ports when TLS is required.
 	PlaintextPolicySuffix = "-plaintext"
 
-	// KeeperPolicySuffix names the NetworkPolicy limiting who reaches Keeper.
+	// KeeperPolicySuffix names the NetworkPolicy limiting who reaches Keeper
+	// when TLS is required.
 	KeeperPolicySuffix = "-keeper-access"
-
-	// ProtocolAll, ProtocolHTTP and ProtocolNative are the values of
-	// NetworkParameters.Protocols.
-	ProtocolAll    = "all"
-	ProtocolHTTP   = "http"
-	ProtocolNative = "native"
 
 	// BackupAPIPolicySuffix names the NetworkPolicy limiting who reaches the
 	// clickhouse-backup sidecar REST API.

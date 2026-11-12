@@ -17,7 +17,6 @@ package provider
 import (
 	"fmt"
 	"os"
-	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -67,10 +66,9 @@ func externalHost(c *controller.Context) string {
 // Instance reachable by name, and removes those no longer wanted.
 func reconcileExternalAccess(c *controller.Context) error {
 	host := externalHost(c)
-	protocols := clientProtocols(c)
 	mode := tlsMode(c)
-	wantHTTP := host != "" && slices.Contains(protocols, common.ProtocolHTTP) && mode != common.TLSModeRequired
-	wantNative := host != "" && slices.Contains(protocols, common.ProtocolNative) && mode != ""
+	wantHTTP := host != "" && mode != common.TLSModeRequired
+	wantNative := host != "" && mode != ""
 
 	if err := reconcileObject(c, &networkingv1.Ingress{ObjectMeta: c.ObjectMeta(c.Name() + externalHTTPSuffix)}, wantHTTP,
 		func() client.Object { return externalHTTPIngress(c, host) }); err != nil {

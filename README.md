@@ -67,7 +67,6 @@ provider itself is covered under [Upgrading the provider](#upgrading-the-provide
 | Query limits (OOM protection) | ✅ | server memory budget and per-query limits derived from the memory limit, spill to disk, `readonly` profile for BI users; see [Query limits](#query-limits-oom-protection) |
 | Monitoring | ✅ | native Prometheus metrics endpoint always exposed; optional `PodMonitor` via the engine component's `podMonitor` parameter |
 | Authentication | ✅ | an administrative user, seeded from `spec.userSecretRef` or generated, with password rotation; `default` user and replica-to-replica traffic authenticated (see [Connecting](#connecting)) |
-| Network access | ✅ | NetworkPolicy always applied: choose the client protocols and who reaches them (anyone by default); see [Network access](#network-access) |
 | TLS | ✅ | opt-in per Instance via the engine component's `tls` parameters; client connections over TLS only by default, distributed queries between replicas over TLS; requires [cert-manager](#prerequisites) |
 | Pod scheduling | ✅ | `spec.components.engine.schedulingPolicy`; see [Pod placement](#pod-placement) |
 
@@ -289,48 +288,22 @@ SETTINGS storage_policy = 'tiered';
 - `verifyTLS: false` on the BackupStorage is not applied to the cold disk; use an
   endpoint with a trusted certificate.
 
-### Network access
-
-A NetworkPolicy always limits the ClickHouse pods. By default HTTP and the native
-protocol are open to anyone; the engine's `network` parameter chooses the protocols
-and limits them to the allowed sources and pods in the Instance's namespace:
-
-```yaml
-spec:
-  components:
-    engine:
-      parameters:
-        network:
-          protocols: native            # all (default) | http | native
-          allowedSources:              # comma-separated, so the Instance form can edit them
-            namespaces: "analytics-app,bi"
-            cidrs: "10.0.5.0/24"
-```
-
-- The form's Network section only chooses the exposure (NodePort or ClusterIP); these fields are YAML/API only.
-- The ports follow the TLS mode: `http` is 8123 or 8443, `native` 9000 or 9440. The
-  Service and the connection details carry the open protocols only.
-- The Instance's own pods (replication, distributed queries) and the operator reach
-  every port; the metrics endpoint stays open to anyone.
-- A `LoadBalancer` or `NodePort` Service opens the chosen protocols to anyone, since
-  external traffic may arrive from a node's address; limit a LoadBalancer with
-  `service.loadBalancerService.sourceRanges`.
-- Keeper accepts the Instance's ClickHouse pods, its own nodes and the operator only.
-
 ### External access by name
 
-With `CLICKHOUSE_EXTERNAL_DOMAIN` set on the provider (chart `extraEnv`), an Instance exposed through a
-`NodePort` or `LoadBalancer` Service is also reachable as `<name>.<domain>` on standard ports, through
-Ingresses of class `CLICKHOUSE_INGRESS_CLASS`:
+The form's Network section chooses the exposure: `NodePort` (default, reachable from outside the
+cluster) or `ClusterIP` (in-cluster only). With `CLICKHOUSE_EXTERNAL_DOMAIN` set on the provider
+(chart `extraEnv`), an Instance exposed through a `NodePort` or `LoadBalancer` Service is also reachable as
+`<name>.<domain>` on standard ports, through Ingresses of class `CLICKHOUSE_INGRESS_CLASS`:
 
 | Protocol | Address | Needs |
 |---|---|---|
-| HTTP | `https://<name>.<domain>` | the `http` protocol open and TLS not `required`; certificate from the ClusterIssuer `CLICKHOUSE_INGRESS_CLUSTER_ISSUER` |
-| native | `<name>.<domain>:9440` (`--secure`) | TLS enabled and the `native` protocol open; TLS passes through to ClickHouse, routed by SNI, and the server certificate covers the name |
+| HTTP | `https://<name>.<domain>` | TLS not `required`; certificate from the ClusterIssuer `CLICKHOUSE_INGRESS_CLUSTER_ISSUER` |
+| native | `<name>.<domain>:9440` (`--secure`) | TLS enabled; TLS passes through to ClickHouse, routed by SNI, and the server certificate covers the name |
 
-Plain native (9000) carries no host name and cannot be routed by name. The platform provides the wildcard DNS
-record `*.<domain>` and an Ingress controller with TLS passthrough (Cilium: `ingress.cilium.io/tls-passthrough`,
-in host network mode a dedicated `tlsPassthroughPort`). The connection details carry the name as `external_host`.
+Plain native (9000) carries no host name and cannot be routed by name; use the node port. The platform
+provides the wildcard DNS record `*.<domain>` and an Ingress controller with TLS passthrough (Cilium:
+`ingress.cilium.io/tls-passthrough`, in host network mode a dedicated `tlsPassthroughPort`). The connection
+details carry the name as `external_host`.
 
 ## Connecting
 

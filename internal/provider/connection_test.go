@@ -71,12 +71,6 @@ func TestConnectionDetailsPortsFollowTLSMode(t *testing.T) {
 		{name: "optional TLS", params: tlsOptionalParams, port: "8443", ports: map[string]string{
 			"http_port": "8123", "native_port": "9000", "https_port": "8443", "native_secure_port": "9440",
 		}},
-		{name: "native only", params: `{"network":{"protocols":"native"}}`, port: "9000", ports: map[string]string{
-			"native_port": "9000",
-		}},
-		{name: "native only, required TLS", params: `{"tls":{"enabled":"enabled"},"network":{"protocols":"native"}}`, port: "9440", ports: map[string]string{
-			"native_secure_port": "9440",
-		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -68,17 +68,13 @@ func servicePorts(tmpl chiv1.ServiceTemplate) []int32 {
 func TestConfigureExposePorts(t *testing.T) {
 	lb := &corev1alpha1.Service{ServiceType: corev1.ServiceTypeLoadBalancer}
 	tests := []struct {
-		name      string
-		service   *corev1alpha1.Service
-		mode      string
-		protocols []string
-		want      []int32
-		headless  bool
+		name     string
+		service  *corev1alpha1.Service
+		mode     string
+		want     []int32
+		headless bool
 	}{
 		{name: "plaintext, not exposed", mode: ""},
-		{name: "native only, not exposed", protocols: []string{"native"}, want: []int32{9000}, headless: true},
-		{name: "http only, optional, LoadBalancer", service: lb, mode: common.TLSModeOptional, protocols: []string{"http"}, want: []int32{8123, 8443}},
-		{name: "native only, required, LoadBalancer", service: lb, mode: common.TLSModeRequired, protocols: []string{"native"}, want: []int32{9440}},
 		{name: "plaintext, LoadBalancer", service: lb, want: []int32{8123, 9000}},
 		{name: "optional, LoadBalancer", service: lb, mode: common.TLSModeOptional, want: []int32{8123, 9000, 8443, 9440}},
 		{name: "required, LoadBalancer", service: lb, mode: common.TLSModeRequired, want: []int32{8443, 9440}},
@@ -86,12 +82,9 @@ func TestConfigureExposePorts(t *testing.T) {
 		{name: "optional, not exposed", mode: common.TLSModeOptional, want: []int32{8123, 9000, 8443, 9440}, headless: true},
 	}
 	for _, tt := range tests {
-		if tt.protocols == nil {
-			tt.protocols = allProtocols
-		}
 		t.Run(tt.name, func(t *testing.T) {
 			spec := &chiv1.ChiSpec{}
-			configureExpose(spec, tt.service, tt.mode, tt.protocols)
+			configureExpose(spec, tt.service, tt.mode)
 			if tt.want == nil {
 				assert.Nil(t, spec.Templates, "the operator's default Service applies")
 				return
@@ -285,14 +278,14 @@ func TestConnectionDetailsCarryCA(t *testing.T) {
 
 // withTLSMode renders chi's client Service as for mode.
 func withTLSMode(chi *chiv1.ClickHouseInstallation, mode string) *chiv1.ClickHouseInstallation {
-	configureExpose(&chi.Spec, nil, mode, allProtocols)
+	configureExpose(&chi.Spec, nil, mode)
 	return chi
 }
 
-func clientPolicyIn(t *testing.T, c *controller.Context) *networkingv1.NetworkPolicy {
+func plaintextPolicyIn(t *testing.T, c *controller.Context) *networkingv1.NetworkPolicy {
 	t.Helper()
 	policy := &networkingv1.NetworkPolicy{}
-	found, err := getOptional(c, policy, "db"+common.ClientPolicySuffix)
+	found, err := getOptional(c, policy, "db"+common.PlaintextPolicySuffix)
 	require.NoError(t, err)
 	if !found {
 		return nil
@@ -300,72 +293,36 @@ func clientPolicyIn(t *testing.T, c *controller.Context) *networkingv1.NetworkPo
 	return policy
 }
 
-func TestClientPolicyFollowsAppliedCHI(t *testing.T) {
+func TestPlaintextPolicyFollowsAppliedCHI(t *testing.T) {
 	t.Setenv(common.EnvOperatorNamespace, "clickhouse-provider")
 	t.Setenv(common.EnvOperatorPodLabels, "app.kubernetes.io/name=operator,app.kubernetes.io/instance=rel")
 	c := newTestContext(t, newTestInstance("db", "ns", tlsRequiredParams))
 
-	// Not applied yet (e.g. held for maintenance): plaintext and secure ports
-	// open, to anyone without allowed sources.
-	require.NoError(t, reconcileNetworkPolicies(c, completedCHI()))
-	policy := clientPolicyIn(t, c)
-	require.NotNil(t, policy, "always applied")
+	// Not applied yet (e.g. held for maintenance): plaintext stays reachable.
+	require.NoError(t, reconcilePlaintextPolicy(c, completedCHI()))
+	assert.Nil(t, plaintextPolicyIn(t, c))
+
+	require.NoError(t, reconcilePlaintextPolicy(c, withTLSMode(completedCHI(), common.TLSModeRequired)))
+	policy := plaintextPolicyIn(t, c)
+	require.NotNil(t, policy)
 	assert.Equal(t, map[string]string{common.LabelCHIName: "db"}, policy.Spec.PodSelector.MatchLabels)
-	require.Len(t, policy.Spec.Ingress, 3)
+	require.Len(t, policy.Spec.Ingress, 2)
 
-	metrics := policy.Spec.Ingress[0]
-	assert.Empty(t, metrics.From, "anyone reaches metrics")
-	assert.Equal(t, []int32{9363}, policyPorts(metrics.Ports))
+	open := policy.Spec.Ingress[0]
+	assert.Empty(t, open.From, "anyone reaches the secure ports and metrics")
+	assert.Equal(t, []int32{8443, 9440, 9363}, policyPorts(open.Ports))
 
-	internal := policy.Spec.Ingress[1]
-	assert.Equal(t, []int32{8123, 9000, 8443, 9440, 9009, 9010}, policyPorts(internal.Ports))
-	require.Len(t, internal.From, 2)
-	assert.Equal(t, map[string]string{common.LabelCHIName: "db"}, internal.From[0].PodSelector.MatchLabels)
-	assert.Nil(t, internal.From[0].NamespaceSelector, "the Instance's own namespace")
-	assert.Equal(t, map[string]string{corev1.LabelMetadataName: "clickhouse-provider"}, internal.From[1].NamespaceSelector.MatchLabels)
-	assert.Equal(t, map[string]string{"app.kubernetes.io/name": "operator", "app.kubernetes.io/instance": "rel"}, internal.From[1].PodSelector.MatchLabels)
+	restricted := policy.Spec.Ingress[1]
+	assert.Equal(t, []int32{8123, 9000, 9009, 9010}, policyPorts(restricted.Ports))
+	require.Len(t, restricted.From, 2)
+	assert.Equal(t, map[string]string{common.LabelCHIName: "db"}, restricted.From[0].PodSelector.MatchLabels)
+	assert.Nil(t, restricted.From[0].NamespaceSelector, "the Instance's own namespace")
+	assert.Equal(t, map[string]string{corev1.LabelMetadataName: "clickhouse-provider"}, restricted.From[1].NamespaceSelector.MatchLabels)
+	assert.Equal(t, map[string]string{"app.kubernetes.io/name": "operator", "app.kubernetes.io/instance": "rel"}, restricted.From[1].PodSelector.MatchLabels)
 
-	clients := policy.Spec.Ingress[2]
-	assert.Equal(t, []int32{8123, 8443, 9000, 9440}, policyPorts(clients.Ports))
-	assert.Empty(t, clients.From, "anyone")
-
-	// Required TLS applied: clients get the secure ports only.
-	require.NoError(t, reconcileNetworkPolicies(c, withTLSMode(completedCHI(), common.TLSModeRequired)))
-	assert.Equal(t, []int32{8443, 9440}, policyPorts(clientPolicyIn(t, c).Spec.Ingress[2].Ports))
-}
-
-func TestClientPolicyProtocolsAndSources(t *testing.T) {
-	t.Setenv(common.EnvOperatorNamespace, "clickhouse-provider")
-	params := `{"network":{"protocols":"native","allowedSources":{"namespaces":"app","cidrs":" 10.0.5.0/24 ,"}}}`
-	c := newTestContext(t, newTestInstance("db", "ns", params))
-
-	require.NoError(t, reconcileNetworkPolicies(c, completedCHI()))
-	clients := clientPolicyIn(t, c).Spec.Ingress[2]
-	assert.Equal(t, []int32{9000, 9440}, policyPorts(clients.Ports), "HTTP stays closed")
-	require.Len(t, clients.From, 3)
-	assert.Empty(t, clients.From[0].PodSelector.MatchLabels, "every pod of the Instance's namespace")
-	assert.Nil(t, clients.From[0].NamespaceSelector)
-	assert.Equal(t, map[string]string{corev1.LabelMetadataName: "app"}, clients.From[1].NamespaceSelector.MatchLabels)
-	assert.Equal(t, "10.0.5.0/24", clients.From[2].IPBlock.CIDR)
-
-	// Exposed through a LoadBalancer: open to anyone, sourceRanges limit it.
-	exposed := completedCHI()
-	configureExpose(&exposed.Spec, &corev1alpha1.Service{ServiceType: corev1.ServiceTypeLoadBalancer}, "", []string{"native"})
-	require.NoError(t, reconcileNetworkPolicies(c, exposed))
-	clients = clientPolicyIn(t, c).Spec.Ingress[2]
-	assert.Empty(t, clients.From)
-	assert.Equal(t, []int32{9000, 9440}, policyPorts(clients.Ports))
-}
-
-func TestNetworkPoliciesDeleteLegacyPlaintextPolicy(t *testing.T) {
-	t.Setenv(common.EnvOperatorNamespace, "clickhouse-provider")
-	legacy := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "db" + common.PlaintextPolicySuffix, Namespace: "ns"}}
-	c := newTestContext(t, newTestInstance("db", "ns", ""), legacy)
-
-	require.NoError(t, reconcileNetworkPolicies(c, completedCHI()))
-	found, err := getOptional(c, &networkingv1.NetworkPolicy{}, "db"+common.PlaintextPolicySuffix)
-	require.NoError(t, err)
-	assert.False(t, found)
+	// Back to optional: the policy goes away with the applied CHI.
+	require.NoError(t, reconcilePlaintextPolicy(c, withTLSMode(completedCHI(), common.TLSModeOptional)))
+	assert.Nil(t, plaintextPolicyIn(t, c))
 }
 
 func policyPorts(ports []networkingv1.NetworkPolicyPort) []int32 {
@@ -391,11 +348,11 @@ func TestOperatorPeerDefaults(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestSyncCreatesClientPolicy(t *testing.T) {
+func TestSyncCreatesPlaintextPolicyForRequiredTLS(t *testing.T) {
 	t.Setenv(common.EnvOperatorNamespace, "clickhouse-provider")
 	_, c := syncStandalone(t, newTestInstance("db", "ns", tlsRequiredParams),
 		withTLSMode(completedCHI(), common.TLSModeRequired), issuedCertificate())
-	assert.NotNil(t, clientPolicyIn(t, c))
+	assert.NotNil(t, plaintextPolicyIn(t, c))
 }
 
 func TestInstanceForClientService(t *testing.T) {
