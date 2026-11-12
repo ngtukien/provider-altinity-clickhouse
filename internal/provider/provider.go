@@ -549,6 +549,11 @@ func buildCHI(c *controller.Context, replicasCount int) (*chiv1.ClickHouseInstal
 	return buildCHIWired(c, replicasCount, step)
 }
 
+// configMapPropagationTimeout is how long, in seconds, the operator waits after
+// a ConfigMap change before it counts a host as reconciled: above the kubelet's
+// one-minute sync of mounted ConfigMaps (54 s seen on the lab).
+const configMapPropagationTimeout = 90
+
 // buildCHIWired constructs a ClickHouseInstallation wired to Keeper as given.
 func buildCHIWired(c *controller.Context, replicasCount int, keeper keeperWiring) (*chiv1.ClickHouseInstallation, error) {
 	engine := c.Instance().Spec.Components[common.ComponentEngine]
@@ -623,6 +628,11 @@ func buildCHIWired(c *controller.Context, replicasCount int, keeper keeperWiring
 				Spec:              pvcSpec,
 			}},
 		},
+		// The operator only sleeps this long after a ConfigMap change (default 10 s), while
+		// the kubelet takes up to about a minute to update the mounted files. Shorter, the
+		// cluster is Completed before every replica has loaded remote_servers, and ON
+		// CLUSTER DDL right after Ready reaches only some of them.
+		Reconcile: &chiv1.ChiReconcile{ConfigMapPropagationTimeout: configMapPropagationTimeout},
 	}
 
 	var params components.ClickHouseParameters
