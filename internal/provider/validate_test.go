@@ -250,6 +250,22 @@ func TestValidate(t *testing.T) {
 			want:    []string{"spec.components[engine].parameters.queryLimits.maxMemoryUsage"},
 		},
 		{
+			name:    "valid network",
+			fixture: standaloneFixture,
+			mutate:  engineParameters(`{"network":{"protocols":"all","allowedSources":{"namespaces":"app, bi","cidrs":"10.0.5.0/24"}}}`),
+		},
+		{
+			name:    "invalid network",
+			fixture: standaloneFixture,
+			mutate:  engineParameters(`{"network":{"protocols":"mysql","allowedSources":{"namespaces":"App_1","cidrs":"10.0.5.1/24,nope"}}}`),
+			want: []string{
+				"spec.components[engine].parameters.network.protocols",
+				"spec.components[engine].parameters.network.allowedSources.namespaces",
+				"spec.components[engine].parameters.network.allowedSources.cidrs",
+				"spec.components[engine].parameters.network.allowedSources.cidrs",
+			},
+		},
+		{
 			name:    "cold storage",
 			fixture: standaloneFixture,
 			mutate:  engineParameters(`{"coldStorage":{"storageRef":"lake","cachePercent":20}}`),

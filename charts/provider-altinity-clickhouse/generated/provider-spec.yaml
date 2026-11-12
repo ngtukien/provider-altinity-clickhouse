@@ -69,6 +69,33 @@ spec:
                 Each entry maps to a server-level setting rendered into config.d,
                 e.g. `max_concurrent_queries: 200` or `logger/level: information`.
               type: string
+            network:
+              description: |-
+                Network chooses which client protocols are open and who reaches them.
+                A NetworkPolicy always applies: by default HTTP and native are open to
+                anyone, the other ports to the Instance's own pods and the operator.
+              properties:
+                allowedSources:
+                  description: |-
+                    AllowedSources limits the open protocols to these sources and pods in
+                    the Instance's namespace; unset, anyone reaches them. A LoadBalancer or
+                    NodePort Service opens them to everyone; limit those with the Service's
+                    loadBalancerService.sourceRanges.
+                  properties:
+                    cidrs:
+                      description: CIDRs whose addresses may connect, comma-separated, e.g. "10.0.5.0/24".
+                      type: string
+                    namespaces:
+                      description: Namespaces whose pods may connect, comma-separated, e.g. "app,bi".
+                      type: string
+                  type: object
+                protocols:
+                  description: |-
+                    Protocols opens the client protocols: "all" (default), "http" (8123,
+                    or 8443 with TLS) or "native" (9000, or 9440 with TLS). The others stay
+                    reachable only by the Instance's own pods and the operator.
+                  type: string
+              type: object
             podMonitor:
               description: |-
                 PodMonitor gates creation of a Prometheus PodMonitor for the ClickHouse
@@ -246,6 +273,58 @@ spec:
                 required: true
           description: Select the ClickHouse version to deploy.
           label: Database Version
+        network:
+          components:
+            cidrs:
+              fieldParams:
+                helperText: Comma-separated IP ranges.
+                label: Allowed CIDRs
+                placeholder: 10.0.5.0/24
+              path: spec.components.engine.parameters.network.allowedSources.cidrs
+              uiType: text
+            namespaces:
+              fieldParams:
+                helperText: 'Comma-separated. Empty with no CIDRs: anyone may connect; otherwise only these and this namespace. Ignored with NodePort.'
+                label: Allowed namespaces
+                placeholder: app, bi
+              path: spec.components.engine.parameters.network.allowedSources.namespaces
+              uiType: text
+            protocols:
+              fieldParams:
+                defaultValue: all
+                helperText: HTTP is 8123 (8443 with TLS), native is 9000 (9440 with TLS).
+                label: Protocols
+                options:
+                  - label: HTTP and native
+                    value: all
+                  - label: HTTP only
+                    value: http
+                  - label: Native only
+                    value: native
+              path: spec.components.engine.parameters.network.protocols
+              uiType: select
+            serviceType:
+              fieldParams:
+                defaultValue: NodePort
+                helperText: 'NodePort: reachable from outside the cluster on <node IP>:<node port> (see the connection details). ClusterIP: in-cluster only. Fixed after creation.'
+                label: Exposure
+                modes:
+                  edit:
+                    disabled: true
+                options:
+                  - label: NodePort (outside the cluster)
+                    value: NodePort
+                  - label: ClusterIP (in-cluster only)
+                    value: ClusterIP
+              path: spec.components.engine.service.serviceType
+              uiType: select
+          componentsOrder:
+            - serviceType
+            - protocols
+            - namespaces
+            - cidrs
+          description: Choose the client protocols and who may connect.
+          label: Network
         resources:
           components:
             compute:
@@ -337,6 +416,7 @@ spec:
         - scaling
         - resources
         - security
+        - network
     sharded:
       sections:
         databaseVersion:
@@ -356,6 +436,58 @@ spec:
                 required: true
           description: Select the ClickHouse version to deploy.
           label: Database Version
+        network:
+          components:
+            cidrs:
+              fieldParams:
+                helperText: Comma-separated IP ranges.
+                label: Allowed CIDRs
+                placeholder: 10.0.5.0/24
+              path: spec.components.engine.parameters.network.allowedSources.cidrs
+              uiType: text
+            namespaces:
+              fieldParams:
+                helperText: 'Comma-separated. Empty with no CIDRs: anyone may connect; otherwise only these and this namespace. Ignored with NodePort.'
+                label: Allowed namespaces
+                placeholder: app, bi
+              path: spec.components.engine.parameters.network.allowedSources.namespaces
+              uiType: text
+            protocols:
+              fieldParams:
+                defaultValue: all
+                helperText: HTTP is 8123 (8443 with TLS), native is 9000 (9440 with TLS).
+                label: Protocols
+                options:
+                  - label: HTTP and native
+                    value: all
+                  - label: HTTP only
+                    value: http
+                  - label: Native only
+                    value: native
+              path: spec.components.engine.parameters.network.protocols
+              uiType: select
+            serviceType:
+              fieldParams:
+                defaultValue: NodePort
+                helperText: 'NodePort: reachable from outside the cluster on <node IP>:<node port> (see the connection details). ClusterIP: in-cluster only. Fixed after creation.'
+                label: Exposure
+                modes:
+                  edit:
+                    disabled: true
+                options:
+                  - label: NodePort (outside the cluster)
+                    value: NodePort
+                  - label: ClusterIP (in-cluster only)
+                    value: ClusterIP
+              path: spec.components.engine.service.serviceType
+              uiType: select
+          componentsOrder:
+            - serviceType
+            - protocols
+            - namespaces
+            - cidrs
+          description: Choose the client protocols and who may connect.
+          label: Network
         resources:
           components:
             compute:
@@ -471,6 +603,7 @@ spec:
         - scaling
         - resources
         - security
+        - network
     standalone:
       sections:
         databaseVersion:
@@ -490,6 +623,58 @@ spec:
                 required: true
           description: Select the ClickHouse version to deploy.
           label: Database Version
+        network:
+          components:
+            cidrs:
+              fieldParams:
+                helperText: Comma-separated IP ranges.
+                label: Allowed CIDRs
+                placeholder: 10.0.5.0/24
+              path: spec.components.engine.parameters.network.allowedSources.cidrs
+              uiType: text
+            namespaces:
+              fieldParams:
+                helperText: 'Comma-separated. Empty with no CIDRs: anyone may connect; otherwise only these and this namespace. Ignored with NodePort.'
+                label: Allowed namespaces
+                placeholder: app, bi
+              path: spec.components.engine.parameters.network.allowedSources.namespaces
+              uiType: text
+            protocols:
+              fieldParams:
+                defaultValue: all
+                helperText: HTTP is 8123 (8443 with TLS), native is 9000 (9440 with TLS).
+                label: Protocols
+                options:
+                  - label: HTTP and native
+                    value: all
+                  - label: HTTP only
+                    value: http
+                  - label: Native only
+                    value: native
+              path: spec.components.engine.parameters.network.protocols
+              uiType: select
+            serviceType:
+              fieldParams:
+                defaultValue: NodePort
+                helperText: 'NodePort: reachable from outside the cluster on <node IP>:<node port> (see the connection details). ClusterIP: in-cluster only. Fixed after creation.'
+                label: Exposure
+                modes:
+                  edit:
+                    disabled: true
+                options:
+                  - label: NodePort (outside the cluster)
+                    value: NodePort
+                  - label: ClusterIP (in-cluster only)
+                    value: ClusterIP
+              path: spec.components.engine.service.serviceType
+              uiType: select
+          componentsOrder:
+            - serviceType
+            - protocols
+            - namespaces
+            - cidrs
+          description: Choose the client protocols and who may connect.
+          label: Network
         resources:
           components:
             compute:
@@ -563,6 +748,7 @@ spec:
         - databaseVersion
         - resources
         - security
+        - network
   versions:
     - components:
         engine: 26.8.31.2

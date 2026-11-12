@@ -221,13 +221,22 @@ const (
 	KeeperSecurePort = 2281
 	KeeperRaftPort   = 9444
 
-	// PlaintextPolicySuffix is appended to the Instance name to form the
-	// NetworkPolicy that limits the plaintext ports when TLS is required.
+	// ClientPolicySuffix names the NetworkPolicy limiting who reaches the
+	// ClickHouse ports (see NetworkParameters).
+	ClientPolicySuffix = "-client-access"
+
+	// PlaintextPolicySuffix named the NetworkPolicy ClientPolicySuffix
+	// replaces; it is deleted where an earlier version created it.
 	PlaintextPolicySuffix = "-plaintext"
 
-	// KeeperPolicySuffix names the NetworkPolicy limiting who reaches Keeper
-	// when TLS is required.
+	// KeeperPolicySuffix names the NetworkPolicy limiting who reaches Keeper.
 	KeeperPolicySuffix = "-keeper-access"
+
+	// ProtocolAll, ProtocolHTTP and ProtocolNative are the values of
+	// NetworkParameters.Protocols.
+	ProtocolAll    = "all"
+	ProtocolHTTP   = "http"
+	ProtocolNative = "native"
 
 	// BackupAPIPolicySuffix names the NetworkPolicy limiting who reaches the
 	// clickhouse-backup sidecar REST API.
@@ -247,6 +256,10 @@ const (
 	// ConnectionKeyInternalHost is the in-cluster address, which differs from
 	// host when the Instance is exposed through a LoadBalancer.
 	ConnectionKeyInternalHost = "internal_host"
+
+	// ConnectionKeyExternalHost is <name>.<domain> when the Instance is
+	// reachable by name (HTTPS on 443, native TLS on 9440).
+	ConnectionKeyExternalHost = "external_host"
 	// The ports clients may use, for the TLS mode, on either host.
 	ConnectionKeyHTTPPort         = "http_port"
 	ConnectionKeyHTTPSPort        = "https_port"
@@ -261,6 +274,13 @@ const (
 	// chart sets both; the namespace defaults to the provider's own.
 	EnvOperatorNamespace = "CLICKHOUSE_OPERATOR_NAMESPACE"
 	EnvOperatorPodLabels = "CLICKHOUSE_OPERATOR_POD_LABELS"
+
+	// EnvExternalDomain makes exposed Instances reachable as <name>.<domain>
+	// through Ingresses of class EnvIngressClass; EnvIngressClusterIssuer
+	// issues their HTTPS certificates (see reconcileExternalAccess).
+	EnvExternalDomain       = "CLICKHOUSE_EXTERNAL_DOMAIN"
+	EnvIngressClass         = "CLICKHOUSE_INGRESS_CLASS"
+	EnvIngressClusterIssuer = "CLICKHOUSE_INGRESS_CLUSTER_ISSUER"
 
 	// DefaultOperatorPodLabels selects the operator the chart bundles.
 	DefaultOperatorPodLabels = "app.kubernetes.io/name=operator"

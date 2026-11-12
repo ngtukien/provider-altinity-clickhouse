@@ -77,9 +77,9 @@ ui:
             - memory
             - disk
 
-    # dbaas: form cho khách chỉ giữ version, tài nguyên và TLS. Monitoring, StorageClass, chính sách giữ dữ
-    # liệu, kiểu Service và config tự do là việc của platform: bỏ khỏi form, provider dùng mặc định
-    # (không PodMonitor, StorageClass mặc định, Retain, ClusterIP, không config thêm).
+    # dbaas: form cho khách giữ version, tài nguyên, TLS và mạng. Monitoring, StorageClass, chính sách giữ dữ
+    # liệu và config tự do là việc của platform: bỏ khỏi form, provider dùng mặc định
+    # (không PodMonitor, StorageClass mặc định, Retain, không config thêm).
     security:
       label: "Security"
       description: "Encrypt client connections."
@@ -99,7 +99,62 @@ ui:
       componentsOrder:
         - tls
 
+    # dbaas: mạng do khách chọn (network.*): chuỗi, danh sách cách nhau bằng dấu phẩy vì form không nhập được mảng.
+    network:
+      label: "Network"
+      description: "Choose the client protocols and who may connect."
+      components:
+        protocols:
+          uiType: select
+          path: spec.components.engine.parameters.network.protocols
+          fieldParams:
+            label: "Protocols"
+            helperText: "HTTP is 8123 (8443 with TLS), native is 9000 (9440 with TLS)."
+            defaultValue: "all"
+            options:
+              - label: "HTTP and native"
+                value: "all"
+              - label: "HTTP only"
+                value: "http"
+              - label: "Native only"
+                value: "native"
+        serviceType:
+          uiType: select
+          path: spec.components.engine.service.serviceType
+          fieldParams:
+            label: "Exposure"
+            helperText: "NodePort: reachable from outside the cluster on <node IP>:<node port> (see the connection details). ClusterIP: in-cluster only. Fixed after creation."
+            defaultValue: "NodePort"
+            options:
+              - label: "NodePort (outside the cluster)"
+                value: "NodePort"
+              - label: "ClusterIP (in-cluster only)"
+                value: "ClusterIP"
+            modes:
+              edit:
+                disabled: true
+        namespaces:
+          uiType: text
+          path: spec.components.engine.parameters.network.allowedSources.namespaces
+          fieldParams:
+            label: "Allowed namespaces"
+            placeholder: "app, bi"
+            helperText: "Comma-separated. Empty with no CIDRs: anyone may connect; otherwise only these and this namespace. Ignored with NodePort."
+        cidrs:
+          uiType: text
+          path: spec.components.engine.parameters.network.allowedSources.cidrs
+          fieldParams:
+            label: "Allowed CIDRs"
+            placeholder: "10.0.5.0/24"
+            helperText: "Comma-separated IP ranges."
+      componentsOrder:
+        - serviceType
+        - protocols
+        - namespaces
+        - cidrs
+
   sectionsOrder:
     - databaseVersion
     - resources
     - security
+    - network

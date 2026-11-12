@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"strconv"
 
 	chiv1 "github.com/altinity/clickhouse-operator/pkg/apis/clickhouse.altinity.com/v1"
@@ -41,8 +42,11 @@ func buildConnectionDetails(c *controller.Context, chi *chiv1.ClickHouseInstalla
 		internalHost = fmt.Sprintf("%s.%s.svc", clientServiceName(c.Name()), c.Namespace())
 	}
 	additional := map[string]string{common.ConnectionKeyInternalHost: internalHost}
+	if host := externalHost(c); host != "" {
+		additional[common.ConnectionKeyExternalHost] = host
+	}
 
-	ports := clientPorts(tlsMode(c))
+	ports := clientPorts(tlsMode(c), clientProtocols(c))
 	for key, port := range ports {
 		additional[key] = strconv.Itoa(port)
 	}
@@ -63,8 +67,15 @@ func buildConnectionDetails(c *controller.Context, chi *chiv1.ClickHouseInstalla
 	}
 
 	scheme, port := "http", common.HTTPPort
+	if !slices.Contains(clientProtocols(c), common.ProtocolHTTP) {
+		scheme, port = "clickhouse", common.TCPPort
+	}
 	if tlsEnabled(c) {
-		scheme, port = "https", common.HTTPSPort
+		if scheme == "http" {
+			scheme, port = "https", common.HTTPSPort
+		} else {
+			port = common.TCPSecurePort
+		}
 		// Clients need the CA to verify a provider-managed certificate.
 		if ca := readCACert(c); ca != "" {
 			additional[common.ConnectionKeyCACert] = ca
@@ -90,17 +101,27 @@ func buildConnectionDetails(c *controller.Context, chi *chiv1.ClickHouseInstalla
 	}
 }
 
-// clientPorts returns the ports clients may use in the TLS mode, by
-// connection details key: required TLS leaves out the plaintext ones.
-func clientPorts(tlsMode string) map[string]int {
+// clientPorts returns the ports of the open protocols clients may use in the
+// TLS mode, by connection details key: required TLS leaves out the plaintext
+// ones.
+func clientPorts(tlsMode string, protocols []string) map[string]int {
+	http, native := slices.Contains(protocols, common.ProtocolHTTP), slices.Contains(protocols, common.ProtocolNative)
 	ports := map[string]int{}
 	if tlsMode != common.TLSModeRequired {
-		ports[common.ConnectionKeyHTTPPort] = common.HTTPPort
-		ports[common.ConnectionKeyNativePort] = common.TCPPort
+		if http {
+			ports[common.ConnectionKeyHTTPPort] = common.HTTPPort
+		}
+		if native {
+			ports[common.ConnectionKeyNativePort] = common.TCPPort
+		}
 	}
 	if tlsMode != "" {
-		ports[common.ConnectionKeyHTTPSPort] = common.HTTPSPort
-		ports[common.ConnectionKeyNativeSecurePort] = common.TCPSecurePort
+		if http {
+			ports[common.ConnectionKeyHTTPSPort] = common.HTTPSPort
+		}
+		if native {
+			ports[common.ConnectionKeyNativeSecurePort] = common.TCPSecurePort
+		}
 	}
 	return ports
 }

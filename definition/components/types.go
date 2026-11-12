@@ -56,6 +56,32 @@ type ClickHouseParameters struct {
 	// `SETTINGS storage_policy = 'tiered'` and move old data with
 	// `TTL ... TO VOLUME 'cold'`. The default policy is unchanged.
 	ColdStorage *ColdStorageParameters `json:"coldStorage,omitempty"`
+	// Network chooses which client protocols are open and who reaches them.
+	// A NetworkPolicy always applies: by default HTTP and native are open to
+	// anyone, the other ports to the Instance's own pods and the operator.
+	Network *NetworkParameters `json:"network,omitempty"`
+}
+
+// NetworkParameters configures client access to ClickHouse. Values are
+// strings, lists comma-separated, so the Instance form can edit them.
+type NetworkParameters struct {
+	// Protocols opens the client protocols: "all" (default), "http" (8123,
+	// or 8443 with TLS) or "native" (9000, or 9440 with TLS). The others stay
+	// reachable only by the Instance's own pods and the operator.
+	Protocols string `json:"protocols,omitempty"`
+	// AllowedSources limits the open protocols to these sources and pods in
+	// the Instance's namespace; unset, anyone reaches them. A LoadBalancer or
+	// NodePort Service opens them to everyone; limit those with the Service's
+	// loadBalancerService.sourceRanges.
+	AllowedSources *AllowedSources `json:"allowedSources,omitempty"`
+}
+
+// AllowedSources lists clients allowed to reach the open protocols.
+type AllowedSources struct {
+	// Namespaces whose pods may connect, comma-separated, e.g. "app,bi".
+	Namespaces string `json:"namespaces,omitempty"`
+	// CIDRs whose addresses may connect, comma-separated, e.g. "10.0.5.0/24".
+	CIDRs string `json:"cidrs,omitempty"`
 }
 
 // QueryLimitsParameters configures the server memory budget and the settings

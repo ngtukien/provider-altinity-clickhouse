@@ -292,7 +292,10 @@ func applyAndWaitForCHI(c *controller.Context, gate *rolloutGate, chi *chiv1.Cli
 	if err := c.Get(current, c.Name()); err != nil {
 		return controller.WaitForDuration("waiting for Altinity operator to provision ClickHouseInstallation", 15*time.Second)
 	}
-	if err := reconcilePlaintextPolicy(c, current); err != nil {
+	if err := reconcileNetworkPolicies(c, current); err != nil {
+		return err
+	}
+	if err := reconcileExternalAccess(c); err != nil {
 		return err
 	}
 	if err := waitForCHI(c, current); err != nil {
@@ -656,7 +659,7 @@ func buildCHIWired(c *controller.Context, replicasCount int, keeper keeperWiring
 	}
 
 	// Wire the root Service exposure (ClusterIP / LoadBalancer / NodePort).
-	configureExpose(&spec, engine.Service, mode)
+	configureExpose(&spec, engine.Service, mode, clientProtocols(c))
 
 	// Wire Keeper for the replicated topology (see keeperZookeeper), and for
 	// the sharded one even with a single replica per shard: ON CLUSTER DDL and
@@ -790,45 +793,31 @@ func keeperCRName(instanceName string) string {
 // is added only to set the ports for TLS.
 //
 // tlsMode selects the ports: plaintext without TLS, plaintext and secure with
-// "optional", and only the secure ones with "required".
-func configureExpose(spec *chiv1.ChiSpec, service *corev1alpha1.Service, tlsMode string) {
+// "optional", and only the secure ones with "required"; protocols keeps those
+// of the open client protocols.
+func configureExpose(spec *chiv1.ChiSpec, service *corev1alpha1.Service, tlsMode string, protocols []string) {
 	exposed := service != nil && service.ServiceType != ""
-	if !exposed && tlsMode == "" {
+	if !exposed && tlsMode == "" && len(protocols) == len(allProtocols) {
 		return
 	}
 
+	open := clientPorts(tlsMode, protocols)
 	var ports []corev1.ServicePort
-	if tlsMode != common.TLSModeRequired {
-		ports = append(ports,
-			corev1.ServicePort{
-				Name:       chiv1.ChDefaultHTTPPortName,
-				Protocol:   corev1.ProtocolTCP,
-				Port:       chiv1.ChDefaultHTTPPortNumber,
-				TargetPort: intstr.FromString(chiv1.ChDefaultHTTPPortName),
-			},
-			corev1.ServicePort{
-				Name:       chiv1.ChDefaultTCPPortName,
-				Protocol:   corev1.ProtocolTCP,
-				Port:       chiv1.ChDefaultTCPPortNumber,
-				TargetPort: intstr.FromString(chiv1.ChDefaultTCPPortName),
-			},
-		)
-	}
-	if tlsMode != "" {
-		ports = append(ports,
-			corev1.ServicePort{
-				Name:       chiv1.ChDefaultHTTPSPortName,
-				Protocol:   corev1.ProtocolTCP,
-				Port:       chiv1.ChDefaultHTTPSPortNumber,
-				TargetPort: intstr.FromString(chiv1.ChDefaultHTTPSPortName),
-			},
-			corev1.ServicePort{
-				Name:       chiv1.ChDefaultTLSPortName,
-				Protocol:   corev1.ProtocolTCP,
-				Port:       chiv1.ChDefaultTLSPortNumber,
-				TargetPort: intstr.FromString(chiv1.ChDefaultTLSPortName),
-			},
-		)
+	for _, p := range []struct {
+		key  string
+		name string
+		port int32
+	}{
+		{common.ConnectionKeyHTTPPort, chiv1.ChDefaultHTTPPortName, chiv1.ChDefaultHTTPPortNumber},
+		{common.ConnectionKeyNativePort, chiv1.ChDefaultTCPPortName, chiv1.ChDefaultTCPPortNumber},
+		{common.ConnectionKeyHTTPSPort, chiv1.ChDefaultHTTPSPortName, chiv1.ChDefaultHTTPSPortNumber},
+		{common.ConnectionKeyNativeSecurePort, chiv1.ChDefaultTLSPortName, chiv1.ChDefaultTLSPortNumber},
+	} {
+		if _, ok := open[p.key]; ok {
+			ports = append(ports, corev1.ServicePort{
+				Name: p.name, Protocol: corev1.ProtocolTCP, Port: p.port, TargetPort: intstr.FromString(p.name),
+			})
+		}
 	}
 
 	tmpl := chiv1.ServiceTemplate{

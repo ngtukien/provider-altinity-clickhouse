@@ -151,6 +151,7 @@ func validateEngine(instance *corev1alpha1.Instance, engine corev1alpha1.Compone
 	errs = append(errs, validateQueryLimits(paramsPath.Child("queryLimits"), params.QueryLimits,
 		resolveResources(engine).Limits[corev1.ResourceMemory])...)
 	errs = append(errs, validateColdStorage(paramsPath.Child("coldStorage"), params.ColdStorage)...)
+	errs = append(errs, validateNetwork(paramsPath.Child("network"), params.Network)...)
 
 	if engine.Service != nil && engine.Service.ServiceType != "" && !slices.Contains(serviceTypes, engine.Service.ServiceType) {
 		errs = append(errs, field.NotSupported(enginePath.Child("service", "serviceType"), engine.Service.ServiceType, serviceTypes))

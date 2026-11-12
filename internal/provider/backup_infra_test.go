@@ -120,7 +120,7 @@ func TestBackupDisabled(t *testing.T) {
 	assert.Nil(t, chi.Spec.Backup, "CHI spec.Backup must be nil when backup disabled")
 
 	// NetworkPolicy -backup-api is not created
-	require.NoError(t, reconcilePlaintextPolicy(cDisabled, completedCHI()))
+	require.NoError(t, reconcileNetworkPolicies(cDisabled, completedCHI()))
 	assert.Nil(t, backupPolicyIn(t, cDisabled), "-backup-api policy must not exist when backup disabled")
 }
 
@@ -312,52 +312,25 @@ func TestBackupAPINetworkPolicy(t *testing.T) {
 
 	c := newTestContext(t, instance, bs, creds)
 
-	// Case 1: TLS not required -> Rule A and Rule B present
+	// Only the backup and restore Jobs reach the sidecar API; the client
+	// policy governs the other ports.
 	chiPlain := completedCHI()
-	require.NoError(t, reconcilePlaintextPolicy(c, chiPlain))
+	require.NoError(t, reconcileNetworkPolicies(c, chiPlain))
 
 	policy := backupPolicyIn(t, c)
 	require.NotNil(t, policy)
 	assert.Equal(t, map[string]string{common.LabelCHIName: "db"}, policy.Spec.PodSelector.MatchLabels)
-	require.Len(t, policy.Spec.Ingress, 2, "must have rule A and rule B when TLS is not required")
-
-	// Rule A: port 7171 only from backup-chi pods
-	ruleA := policy.Spec.Ingress[0]
-	assert.Equal(t, []int32{int32(common.BackupAPIPort)}, policyPorts(ruleA.Ports))
-	require.Len(t, ruleA.From, 1)
-	assert.Equal(t, map[string]string{common.LabelBackupCHIName: "db"}, ruleA.From[0].PodSelector.MatchLabels)
-
-	// Rule B: all other ports open from anywhere (From is empty)
-	ruleB := policy.Spec.Ingress[1]
-	assert.Empty(t, ruleB.From, "rule B must be open from anywhere")
-	expectedPorts := []int32{
-		common.HTTPPort,
-		common.HTTPSPort,
-		common.TCPPort,
-		common.TCPSecurePort,
-		common.InterserverHTTPPort,
-		common.InterserverHTTPSPort,
-		common.MetricsPort,
-	}
-	assert.Equal(t, expectedPorts, policyPorts(ruleB.Ports))
-
-	// Case 2: TLS required -> Rule B absent, only Rule A present
-	chiTLS := withTLSMode(completedCHI(), common.TLSModeRequired)
-	require.NoError(t, reconcilePlaintextPolicy(c, chiTLS))
-
-	policyTLS := backupPolicyIn(t, c)
-	require.NotNil(t, policyTLS)
-	require.Len(t, policyTLS.Spec.Ingress, 1, "rule B must be absent when TLS is required")
-	assert.Equal(t, []int32{int32(common.BackupAPIPort)}, policyPorts(policyTLS.Spec.Ingress[0].Ports))
-	require.Len(t, policyTLS.Spec.Ingress[0].From, 1)
-	assert.Equal(t, map[string]string{common.LabelBackupCHIName: "db"}, policyTLS.Spec.Ingress[0].From[0].PodSelector.MatchLabels)
+	require.Len(t, policy.Spec.Ingress, 1)
+	assert.Equal(t, []int32{int32(common.BackupAPIPort)}, policyPorts(policy.Spec.Ingress[0].Ports))
+	require.Len(t, policy.Spec.Ingress[0].From, 1)
+	assert.Equal(t, map[string]string{common.LabelBackupCHIName: "db"}, policy.Spec.Ingress[0].From[0].PodSelector.MatchLabels)
 
 	// Case 3: Disable backup -> policy removed
 	instanceDisabled := withBackup(newTestInstance("db", "ns", ""), false, corev1alpha1.InstanceBackupStorage{
 		StorageRef: commonv1alpha1.ObjectRef{Name: "s3-storage"},
 	})
 	cDisabled := newTestContext(t, instanceDisabled, bs, creds)
-	require.NoError(t, reconcilePlaintextPolicy(cDisabled, chiPlain))
+	require.NoError(t, reconcileNetworkPolicies(cDisabled, chiPlain))
 	assert.Nil(t, backupPolicyIn(t, cDisabled), "policy must be removed when backup is disabled")
 }
 

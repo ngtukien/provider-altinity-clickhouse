@@ -249,7 +249,7 @@ func TestKeeperPolicy(t *testing.T) {
 	t.Setenv(common.EnvOperatorNamespace, "clickhouse-provider")
 	c := newTestContext(t, newReplicatedTestInstance(tlsRequiredParams))
 
-	require.NoError(t, reconcilePlaintextPolicy(c, withTLSMode(completedCHI(), common.TLSModeRequired)))
+	require.NoError(t, reconcileNetworkPolicies(c, withTLSMode(completedCHI(), common.TLSModeRequired)))
 	policy := &networkingv1.NetworkPolicy{}
 	require.NoError(t, c.Get(policy, "db"+common.KeeperPolicySuffix))
 	assert.Equal(t, map[string]string{common.LabelCHKName: "db-keeper"}, policy.Spec.PodSelector.MatchLabels)
@@ -259,10 +259,17 @@ func TestKeeperPolicy(t *testing.T) {
 	assert.Equal(t, []int32{2181, 2281, 9444}, policyPorts(policy.Spec.Ingress[1].Ports))
 	assert.Empty(t, policy.Spec.Ingress[2].Ports, "the operator reaches every port")
 
-	require.NoError(t, reconcilePlaintextPolicy(c, withTLSMode(completedCHI(), common.TLSModeOptional)))
+	// Kept without required TLS too: Keeper authenticates no one.
+	require.NoError(t, reconcileNetworkPolicies(c, withTLSMode(completedCHI(), common.TLSModeOptional)))
 	found, err := getOptional(c, &networkingv1.NetworkPolicy{}, "db"+common.KeeperPolicySuffix)
 	require.NoError(t, err)
-	assert.False(t, found)
+	assert.True(t, found)
+
+	standalone := newTestContext(t, newTestInstance("db", "ns", ""))
+	require.NoError(t, reconcileNetworkPolicies(standalone, completedCHI()))
+	found, err = getOptional(standalone, &networkingv1.NetworkPolicy{}, "db"+common.KeeperPolicySuffix)
+	require.NoError(t, err)
+	assert.False(t, found, "no Keeper")
 }
 
 func TestServerCertificateCoversKeeper(t *testing.T) {
