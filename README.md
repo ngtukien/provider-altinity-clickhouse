@@ -307,6 +307,15 @@ details then point clients at the name: `host` is `<name>.<domain>`, with `port`
 9440 and a `clickhouse://...?secure=true` URI under required TLS; `internal_host` keeps the in-cluster Service and
 `external_host` the name.
 
+### Load balancer exposure
+
+Where the cluster has a load balancer (e.g. MetalLB), set the chart value `loadBalancer.enabled: true`: the
+Network section then also offers `LoadBalancer`, which gives the Instance its own address on the standard
+ports, and an "Allowed IPs" field (`parameters.loadBalancerSourceRanges`, comma-separated CIDRs) that becomes
+the Service's source ranges, enforced on the client's real address. With the flag off the provider rejects
+`LoadBalancer`, which would stay pending. A LoadBalancer Instance gets no `<name>.<domain>` Ingress: the shared
+Ingress would bypass its source ranges.
+
 ## Connecting
 
 The provider provisions an administrative ClickHouse user for every Instance:

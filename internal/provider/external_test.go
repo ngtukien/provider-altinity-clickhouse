@@ -17,10 +17,13 @@ package provider
 import (
 	"testing"
 
+	chiv1 "github.com/altinity/clickhouse-operator/pkg/apis/clickhouse.altinity.com/v1"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
@@ -88,6 +91,10 @@ func TestExternalAccessOnlyWhenExposedWithADomain(t *testing.T) {
 	assert.Nil(t, externalIngressIn(t, c, externalNativeSuffix))
 	assert.Empty(t, externalHost(c))
 
+	// A LoadBalancer has its own address, limited by its source ranges.
+	c = newTestContext(t, exposedInstance(tlsOptionalParams, corev1.ServiceTypeLoadBalancer))
+	assert.Empty(t, externalHost(c))
+
 	t.Setenv(common.EnvExternalDomain, "")
 	c = newTestContext(t, exposedInstance(tlsOptionalParams, corev1.ServiceTypeNodePort))
 	assert.Empty(t, externalHost(c))
@@ -130,4 +137,36 @@ func TestConnectionDetailsUseExternalHost(t *testing.T) {
 	details = buildConnectionDetails(newTestContext(t, exposedInstance(tlsOptionalParams, corev1.ServiceTypeClusterIP), issuedCertificate()), chi)
 	assert.NotContains(t, details.Host, "example.com")
 	assert.Equal(t, "8443", details.Port)
+}
+
+func TestLoadBalancerExposure(t *testing.T) {
+	enginePath := field.NewPath("spec", "components").Key("engine")
+	lb := &corev1alpha1.Service{ServiceType: corev1.ServiceTypeLoadBalancer}
+
+	t.Setenv(common.EnvLoadBalancerEnabled, "false")
+	errs := validateExposure(enginePath, lb, "")
+	require.Len(t, errs, 1, "no load balancer on the platform")
+	assert.Equal(t, "spec.components[engine].service.serviceType", errs[0].Field)
+	assert.Empty(t, validateExposure(enginePath, &corev1alpha1.Service{ServiceType: corev1.ServiceTypeNodePort}, ""))
+
+	t.Setenv(common.EnvLoadBalancerEnabled, "true")
+	assert.Empty(t, validateExposure(enginePath, lb, "203.0.113.0/24, 198.51.100.7/32"))
+	assert.Len(t, validateExposure(enginePath, lb, "203.0.113.1/24,nope"), 2)
+
+	// The parameter becomes the Service's source ranges, unless the Service sets its own.
+	params := `{"loadBalancerSourceRanges":"203.0.113.0/24, 198.51.100.7/32"}`
+	c := newTestContext(t, exposedInstance(params, corev1.ServiceTypeLoadBalancer))
+	assert.Equal(t, corev1alpha1.SourceRanges{"203.0.113.0/24", "198.51.100.7/32"}, exposedService(c).LoadBalancerService.SourceRanges)
+	spec := &chiv1.ChiSpec{}
+	configureExpose(spec, exposedService(c), "")
+	assert.Equal(t, []string{"203.0.113.0/24", "198.51.100.7/32"}, spec.Templates.ServiceTemplates[0].Spec.LoadBalancerSourceRanges)
+
+	own := withEngine(exposedInstance(params, corev1.ServiceTypeLoadBalancer), func(e *corev1alpha1.ComponentSpec) {
+		e.Service.LoadBalancerService = &corev1alpha1.LoadBalancerService{SourceRanges: corev1alpha1.SourceRanges{"192.0.2.0/24"}}
+	})
+	assert.Equal(t, corev1alpha1.SourceRanges{"192.0.2.0/24"}, exposedService(newTestContext(t, own)).LoadBalancerService.SourceRanges)
+
+	// Ignored by other exposures.
+	c = newTestContext(t, exposedInstance(params, corev1.ServiceTypeNodePort))
+	assert.Nil(t, exposedService(c).LoadBalancerService)
 }

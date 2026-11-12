@@ -659,7 +659,7 @@ func buildCHIWired(c *controller.Context, replicasCount int, keeper keeperWiring
 	}
 
 	// Wire the root Service exposure (ClusterIP / LoadBalancer / NodePort).
-	configureExpose(&spec, engine.Service, mode)
+	configureExpose(&spec, exposedService(c), mode)
 
 	// Wire Keeper for the replicated topology (see keeperZookeeper), and for
 	// the sharded one even with a single replica per shard: ON CLUSTER DDL and

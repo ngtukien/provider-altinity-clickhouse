@@ -152,6 +152,7 @@ func validateEngine(instance *corev1alpha1.Instance, engine corev1alpha1.Compone
 		resolveResources(engine).Limits[corev1.ResourceMemory])...)
 	errs = append(errs, validateColdStorage(paramsPath.Child("coldStorage"), params.ColdStorage)...)
 
+	errs = append(errs, validateExposure(enginePath, engine.Service, params.LoadBalancerSourceRanges)...)
 	if engine.Service != nil && engine.Service.ServiceType != "" && !slices.Contains(serviceTypes, engine.Service.ServiceType) {
 		errs = append(errs, field.NotSupported(enginePath.Child("service", "serviceType"), engine.Service.ServiceType, serviceTypes))
 	}

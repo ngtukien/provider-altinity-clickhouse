@@ -69,6 +69,13 @@ spec:
                 Each entry maps to a server-level setting rendered into config.d,
                 e.g. `max_concurrent_queries: 200` or `logger/level: information`.
               type: string
+            loadBalancerSourceRanges:
+              description: |-
+                LoadBalancerSourceRanges limits a LoadBalancer exposure to these client
+                addresses: comma-separated CIDRs such as "203.0.113.0/24,198.51.100.7/32",
+                so the Instance form can edit them; empty lets anyone in. The platform
+                offers the LoadBalancer exposure only where it has a load balancer.
+              type: string
             podMonitor:
               description: |-
                 PodMonitor gates creation of a Prometheus PodMonitor for the ClickHouse

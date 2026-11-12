@@ -56,6 +56,11 @@ type ClickHouseParameters struct {
 	// `SETTINGS storage_policy = 'tiered'` and move old data with
 	// `TTL ... TO VOLUME 'cold'`. The default policy is unchanged.
 	ColdStorage *ColdStorageParameters `json:"coldStorage,omitempty"`
+	// LoadBalancerSourceRanges limits a LoadBalancer exposure to these client
+	// addresses: comma-separated CIDRs such as "203.0.113.0/24,198.51.100.7/32",
+	// so the Instance form can edit them; empty lets anyone in. The platform
+	// offers the LoadBalancer exposure only where it has a load balancer.
+	LoadBalancerSourceRanges string `json:"loadBalancerSourceRanges,omitempty"`
 }
 
 // QueryLimitsParameters configures the server memory budget and the settings
