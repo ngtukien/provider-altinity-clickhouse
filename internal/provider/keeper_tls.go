@@ -93,7 +93,9 @@ func nextKeeperWiring(tls bool, s keeperState) (step, target keeperWiring) {
 	// ClickHouse still uses (or may still use) a port: Keeper keeps it.
 	settled := s.chiRolledOut && step.port == s.chiPort
 	usesSecure := s.chiPort == common.KeeperSecurePort || (!settled && s.chkSecure && s.chiExists)
-	usesPlaintext := s.chiExists && s.chiPort >= 0 && (s.chiPort != common.KeeperSecurePort || !settled)
+	// Only a plaintext port Keeper serves can still be in use: a rollout of
+	// ClickHouse alone (new replica, resources) must not reopen it.
+	usesPlaintext := s.chiExists && s.chiPort >= 0 && (s.chiPort != common.KeeperSecurePort || (!settled && s.chkPlaintext))
 	step.secure = tls || usesSecure
 	step.plaintext = !tls || usesPlaintext
 	return step, target

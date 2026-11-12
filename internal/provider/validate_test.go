@@ -681,6 +681,16 @@ func TestValidateReferences(t *testing.T) {
 			objects:  []client.Object{newerCHK},
 			want:     []string{"spec.version"},
 		},
+		{
+			name:     "cold storage names a missing BackupStorage",
+			instance: coldInstance(`{"coldStorage":{"storageRef":"missing"}}`),
+			want:     []string{"spec.components[engine].parameters.coldStorage.storageRef"},
+		},
+		{
+			name:     "cold storage names an existing BackupStorage",
+			instance: coldInstance(`{"coldStorage":{"storageRef":"cold"}}`),
+			objects:  []client.Object{testBackupStorage("cold", "cold-creds", "lake", "https://s3.example.com", "us-east-1", nil, nil)},
+		},
 	}
 
 	for _, tt := range tests {

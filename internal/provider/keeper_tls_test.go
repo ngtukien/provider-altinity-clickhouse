@@ -123,6 +123,14 @@ func TestKeeperWiringMigrations(t *testing.T) {
 		step, _ = nextKeeperWiring(true, moving)
 		assert.True(t, step.plaintext)
 	})
+	t.Run("a ClickHouse rollout with TLS leaves Keeper as it is", func(t *testing.T) {
+		// New replica or resources: the CHI rolls, Keeper serves only TLS.
+		rolling := tlsOnly
+		rolling.chiRolledOut = false
+		step, target := nextKeeperWiring(true, rolling)
+		assert.Equal(t, target, step)
+		assert.False(t, step.plaintext, "reopening the plaintext port would roll Keeper")
+	})
 }
 
 func TestKeeperWiringRendering(t *testing.T) {

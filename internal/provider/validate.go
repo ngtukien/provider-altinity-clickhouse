@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
+	backupv1alpha1 "github.com/openeverest/openeverest/v2/api/backup/v1alpha1"
 	corev1alpha1 "github.com/openeverest/openeverest/v2/api/core/v1alpha1"
 	"github.com/openeverest/openeverest/v2/provider-runtime/controller"
 
@@ -101,7 +102,26 @@ func (p *Provider) ValidateReferences(c *controller.Context) (field.ErrorList, e
 	if err != nil {
 		return nil, err
 	}
-	return slices.Concat(errs, engineErrs, keeperErrs), nil
+	coldErrs, err := validateColdStorageRef(c)
+	if err != nil {
+		return nil, err
+	}
+	return slices.Concat(errs, engineErrs, keeperErrs, coldErrs), nil
+}
+
+// validateColdStorageRef reports a coldStorage that names a missing
+// BackupStorage, so the Instance shows it instead of staying Ready while sync
+// waits for it.
+func validateColdStorageRef(c *controller.Context) (field.ErrorList, error) {
+	p := coldStorageParams(c)
+	if p == nil {
+		return nil, nil
+	}
+	found, err := getOptional(c, &backupv1alpha1.BackupStorage{}, p.StorageRef)
+	if err != nil || found {
+		return nil, err
+	}
+	return field.ErrorList{field.NotFound(enginePath.Child("parameters", "coldStorage", "storageRef"), p.StorageRef)}, nil
 }
 
 // validateEngine checks the engine's resources, replicas, parameters and
