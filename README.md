@@ -303,7 +303,9 @@ cluster) or `ClusterIP` (in-cluster only). With `CLICKHOUSE_EXTERNAL_DOMAIN` set
 Plain native (9000) carries no host name and cannot be routed by name; use the node port. The platform
 provides the wildcard DNS record `*.<domain>` and an Ingress controller with TLS passthrough (Cilium:
 `ingress.cilium.io/tls-passthrough`, in host network mode a dedicated `tlsPassthroughPort`). The connection
-details carry the name as `external_host`.
+details then point clients at the name: `host` is `<name>.<domain>`, with `port` 443 and an `https://` URI, or
+9440 and a `clickhouse://...?secure=true` URI under required TLS; `internal_host` keeps the in-cluster Service and
+`external_host` the name.
 
 ## Connecting
 

@@ -44,6 +44,8 @@ import (
 // platform's job.
 
 const (
+	// externalHTTPSPort is where the Ingress controller serves HTTPS.
+	externalHTTPSPort     = 443
 	externalServiceSuffix = "-external"
 	externalHTTPSuffix    = "-http"
 	externalNativeSuffix  = "-native"

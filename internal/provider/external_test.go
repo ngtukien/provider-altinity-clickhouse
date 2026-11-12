@@ -108,3 +108,26 @@ func TestExternalAccessRemovedWhenNoLongerWanted(t *testing.T) {
 	assert.Nil(t, externalIngressIn(t, c, externalHTTPSuffix))
 	assert.Nil(t, externalIngressIn(t, c, externalNativeSuffix))
 }
+
+func TestConnectionDetailsUseExternalHost(t *testing.T) {
+	t.Setenv(common.EnvExternalDomain, "clickhouse.example.com")
+	chi := completedCHI()
+
+	// HTTPS through the Ingress on 443.
+	details := buildConnectionDetails(newTestContext(t, exposedInstance(tlsOptionalParams, corev1.ServiceTypeNodePort), issuedCertificate()), chi)
+	assert.Equal(t, "db.clickhouse.example.com", details.Host)
+	assert.Equal(t, "443", details.Port)
+	assert.Regexp(t, `^https://[^@]+@db\.clickhouse\.example\.com:443/$`, details.URI)
+	assert.Equal(t, "db.clickhouse.example.com", details.AdditionalProperties[common.ConnectionKeyExternalHost])
+	assert.NotEqual(t, details.Host, details.AdditionalProperties[common.ConnectionKeyInternalHost])
+
+	// Required TLS closes HTTP to the Ingress: native TLS on 9440.
+	details = buildConnectionDetails(newTestContext(t, exposedInstance(tlsRequiredParams, corev1.ServiceTypeNodePort), issuedCertificate()), chi)
+	assert.Equal(t, "9440", details.Port)
+	assert.Regexp(t, `^clickhouse://[^@]+@db\.clickhouse\.example\.com:9440/\?secure=true$`, details.URI)
+
+	// In-cluster only: unchanged.
+	details = buildConnectionDetails(newTestContext(t, exposedInstance(tlsOptionalParams, corev1.ServiceTypeClusterIP), issuedCertificate()), chi)
+	assert.NotContains(t, details.Host, "example.com")
+	assert.Equal(t, "8443", details.Port)
+}

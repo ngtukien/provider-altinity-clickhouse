@@ -74,12 +74,25 @@ func buildConnectionDetails(c *controller.Context, chi *chiv1.ClickHouseInstalla
 		}
 	}
 
+	// Reachable by name: clients outside the cluster connect there, HTTPS
+	// through the Ingress, or native TLS when required TLS closes HTTP to it.
+	query := ""
+	if external := externalHost(c); external != "" {
+		host = external
+		if tlsMode(c) != common.TLSModeRequired {
+			scheme, port = "https", externalHTTPSPort
+		} else {
+			scheme, port, query = "clickhouse", common.TCPSecurePort, "secure=true"
+		}
+	}
+
 	username, password := readCredentials(c)
 	uri := url.URL{
-		Scheme: scheme,
-		User:   url.UserPassword(username, password),
-		Host:   net.JoinHostPort(host, strconv.Itoa(port)),
-		Path:   "/",
+		Scheme:   scheme,
+		User:     url.UserPassword(username, password),
+		Host:     net.JoinHostPort(host, strconv.Itoa(port)),
+		Path:     "/",
+		RawQuery: query,
 	}
 	return controller.ConnectionDetails{
 		Type:                 "clickhouse",
