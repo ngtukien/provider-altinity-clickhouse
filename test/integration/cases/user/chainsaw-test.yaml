@@ -29,8 +29,16 @@ spec:
               set -eu
               POD=$(kubectl get pods -n default -l clickhouse.altinity.com/chi=itest-ch-user \
                 -o jsonpath='{.items[0].metadata.name}')
-              kubectl exec -n default "$POD" -c clickhouse -- clickhouse-client \
-                --user dba --password seeded-password-0123 -q "SELECT currentUser()" | grep -qx dba
+              # ClickHouse reloads users.d on its own after the kubelet updates the file;
+              # on a slow runner that can lag the Instance turning Ready by a few seconds.
+              for i in $(seq 1 12); do
+                if kubectl exec -n default "$POD" -c clickhouse -- clickhouse-client \
+                  --user dba --password seeded-password-0123 -q "SELECT currentUser()" 2>/dev/null | grep -qx dba; then
+                  ok=1; break
+                fi
+                echo "attempt $i: dba cannot log in yet"; sleep 5
+              done
+              [ "${ok:-0}" = 1 ] || { echo "dba never logged in" >&2; exit 1; }
               # `default` is password-protected now, even from inside the pod.
               if kubectl exec -n default "$POD" -c clickhouse -- clickhouse-client -q "SELECT 1" 2>/dev/null; then
                 echo "the default user must not accept a password-less login"

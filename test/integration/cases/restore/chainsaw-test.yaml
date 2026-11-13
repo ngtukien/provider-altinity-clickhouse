@@ -397,7 +397,7 @@ spec:
               kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
                 "CREATE TABLE IF NOT EXISTS default.test_dist ON CLUSTER '{cluster}' AS default.test_sharded ENGINE = Distributed('{cluster}', default, test_sharded, rand())"
               kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
-                "INSERT INTO default.test_dist SELECT number, concat('val_', toString(number)) FROM numbers(20)"
+                "INSERT INTO default.test_dist SELECT number, concat('val_', toString(number)) FROM numbers(20) SETTINGS distributed_foreground_insert = 1"
 
               count=$(kubectl exec -n "$NS" "$POD" -c clickhouse -- clickhouse-client --user admin --password "$PW" -q \
                 "SELECT count() FROM default.test_dist")

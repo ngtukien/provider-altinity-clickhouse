@@ -2,9 +2,12 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
+  # Branches reach main and release/* only through a pull request; tags are releases.
   push:
-    branches: [main]
+    branches: [main, "release/**"]
+    tags: ["v*"]
 
 # Cancel in-progress runs for the same branch/PR when a new commit arrives.
 # On main we let runs queue so every commit is validated.
