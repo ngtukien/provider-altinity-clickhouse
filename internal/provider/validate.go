@@ -173,6 +173,10 @@ func validateEngine(instance *corev1alpha1.Instance, engine corev1alpha1.Compone
 	errs = append(errs, validateColdStorage(paramsPath.Child("coldStorage"), params.ColdStorage)...)
 
 	errs = append(errs, validateExposure(enginePath, params.LoadBalancerSourceRanges, params.ExternalPorts)...)
+	if params.ExternalPorts == common.ExternalPortsTLS && params.TLS != nil && !strings.EqualFold(params.TLS.Enabled, common.TLSEnabled) {
+		errs = append(errs, field.Invalid(enginePath.Child("parameters", "externalPorts"), params.ExternalPorts,
+			"needs TLS: with tls.enabled other than \"enabled\" there are no secure ports to expose"))
+	}
 	if engine.Service != nil && engine.Service.ServiceType != "" && !slices.Contains(serviceTypes, engine.Service.ServiceType) {
 		errs = append(errs, field.NotSupported(enginePath.Child("service", "serviceType"), engine.Service.ServiceType, serviceTypes))
 	}

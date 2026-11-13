@@ -231,6 +231,10 @@ func TestPlatformDefaults(t *testing.T) {
 	assert.False(t, tlsEnabled(own), "an Instance's own tls wins")
 	assert.False(t, externalTLSOnly(own), "an Instance's own externalPorts wins")
 
+	// TLS turned off by the Instance: the default externalPorts cannot apply.
+	plain := newTestContext(t, exposedInstance(`{"tls":{"enabled":"disabled"}}`, corev1.ServiceTypeNodePort))
+	assert.False(t, externalTLSOnly(plain), "no secure ports without TLS")
+
 	internal := newTestContext(t, exposedInstance("", corev1.ServiceTypeClusterIP))
 	assert.False(t, externalTLSOnly(internal), "nothing to expose in the cluster")
 

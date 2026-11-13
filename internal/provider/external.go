@@ -161,7 +161,8 @@ func externalTLSOnly(c *controller.Context) bool {
 		// The platform's default (chart value defaults.externalPorts).
 		ports = os.Getenv(common.EnvDefaultExternalPorts)
 	}
-	return ports == common.ExternalPortsTLS
+	// Without TLS there are no secure ports to expose: expose as before.
+	return ports == common.ExternalPortsTLS && tlsEnabled(c)
 }
 
 // exposureServiceName returns the Service that carries the exposure: the

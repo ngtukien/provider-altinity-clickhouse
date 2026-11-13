@@ -264,6 +264,17 @@ func TestValidate(t *testing.T) {
 			},
 		},
 		{
+			name:    "externalPorts tls with TLS",
+			fixture: standaloneFixture,
+			mutate:  engineParameters(`{"tls":{"enabled":"enabled","mode":"optional"},"externalPorts":"tls"}`),
+		},
+		{
+			name:    "externalPorts tls with TLS off",
+			fixture: standaloneFixture,
+			mutate:  engineParameters(`{"tls":{"enabled":"disabled"},"externalPorts":"tls"}`),
+			want:    []string{"spec.components[engine].parameters.externalPorts"},
+		},
+		{
 			name:    "unknown engine parameter",
 			fixture: standaloneFixture,
 			mutate:  engineParameters(`{"podmonitor":"enabled"}`),
