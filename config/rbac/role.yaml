@@ -40,11 +40,22 @@ rules:
   - backup.openeverest.io
   resources:
   - backupclasses
+  - backupimports
   - backupstorages
   verbs:
   - get
   - list
   - watch
+- apiGroups:
+  - backup.openeverest.io
+  resources:
+  - backupimports/status
+  - backups/status
+  - restores/status
+  verbs:
+  - get
+  - patch
+  - update
 - apiGroups:
   - backup.openeverest.io
   resources:
@@ -64,15 +75,6 @@ rules:
   - backups/finalizers
   - restores/finalizers
   verbs:
-  - update
-- apiGroups:
-  - backup.openeverest.io
-  resources:
-  - backups/status
-  - restores/status
-  verbs:
-  - get
-  - patch
   - update
 - apiGroups:
   - batch

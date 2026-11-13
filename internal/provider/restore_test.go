@@ -155,47 +155,58 @@ func TestSyncRestore_Validation(t *testing.T) {
 		assert.Contains(t, status.Message, `Backup "non-existent-backup" not found`)
 	})
 
-	t.Run("external backup rejected", func(t *testing.T) {
+	externalRestore := func(t *testing.T, path string) (backupv1alpha1.RestoreState, string, *controller.Context) {
+		t.Helper()
 		backup := &backupv1alpha1.Backup{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "external-backup",
-				Namespace: ns,
-			},
+			ObjectMeta: metav1.ObjectMeta{Name: "imported", Namespace: ns},
 			Spec: backupv1alpha1.BackupSpec{
 				Origin: backupv1alpha1.BackupOrigin{
-					Type: backupv1alpha1.BackupOriginTypeExternal,
-					External: &backupv1alpha1.BackupOriginExternal{
-						Path: "/some/path",
-					},
+					Type:     backupv1alpha1.BackupOriginTypeExternal,
+					External: &backupv1alpha1.BackupOriginExternal{Path: path},
 				},
 				StorageRef: commonv1alpha1.ObjectRef{Name: "s3-storage"},
 			},
-			Status: backupv1alpha1.BackupStatus{
-				State: backupv1alpha1.BackupStateSucceeded,
-			},
+			Status: backupv1alpha1.BackupStatus{State: backupv1alpha1.BackupStateSucceeded},
 		}
-
 		restore := &backupv1alpha1.Restore{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "restore-external",
-				Namespace: ns,
-			},
+			ObjectMeta: metav1.ObjectMeta{Name: "restore-external", Namespace: ns},
 			Spec: backupv1alpha1.RestoreSpec{
 				InstanceRef: commonv1alpha1.ObjectRef{Name: instName},
 				DataSource: backupv1alpha1.DataSource{
-					Type: backupv1alpha1.DataSourceTypeBackup,
-					Backup: &backupv1alpha1.DataSourceBackup{
-						BackupRef: commonv1alpha1.ObjectRef{Name: backup.Name},
-					},
+					Type:   backupv1alpha1.DataSourceTypeBackup,
+					Backup: &backupv1alpha1.DataSourceBackup{BackupRef: commonv1alpha1.ObjectRef{Name: backup.Name}},
 				},
 			},
 		}
-
 		c := newRestoreTestContext(t, instance, chi, backup, restore)
 		status, err := p.SyncRestore(c, restore)
 		require.NoError(t, err)
-		assert.Equal(t, backupv1alpha1.RestoreStateFailed, status.State)
-		assert.Contains(t, status.Message, "restoring from external backup is not supported")
+		return status.State, status.Message, c
+	}
+
+	t.Run("imported backup with an unknown path", func(t *testing.T) {
+		state, message, _ := externalRestore(t, "/some/path")
+		assert.Equal(t, backupv1alpha1.RestoreStateFailed, state)
+		assert.Contains(t, message, "unknown path")
+	})
+
+	// Its path names the source: the restore reads that installation's backup.
+	t.Run("imported backup restores from its source", func(t *testing.T) {
+		_, _, c := externalRestore(t, "backup/other-ns/old-ch/clickhouse/dr-1")
+		chr := &chiv1.ClickHouseRestore{}
+		require.NoError(t, c.Get(chr, "restore-external"))
+		assert.Equal(t, "dr-1", chr.Spec.BackupName)
+		assert.Equal(t, "old-ch", chr.Spec.SourceInstallation)
+		assert.Equal(t, "other-ns", chr.Spec.SourceNamespace)
+	})
+
+	t.Run("imported backup of the same Instance", func(t *testing.T) {
+		_, _, c := externalRestore(t, "backup/"+ns+"/"+instName+"/clickhouse/dr-1")
+		chr := &chiv1.ClickHouseRestore{}
+		require.NoError(t, c.Get(chr, "restore-external"))
+		assert.Equal(t, "dr-1", chr.Spec.BackupName)
+		assert.Empty(t, chr.Spec.SourceInstallation)
+		assert.Empty(t, chr.Spec.SourceNamespace)
 	})
 
 	t.Run("backup pending", func(t *testing.T) {

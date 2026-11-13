@@ -8,6 +8,8 @@ restoreParametersSchema:
 description: ClickHouse backups via the Altinity operator's clickhouse-backup sidecar to S3-compatible storage.
 displayName: ClickHouse Backup (clickhouse-backup)
 executionMode: ProviderManaged
+# Backups already in a storage (another cluster's, a lost one's) can be imported and restored.
+supportsImport: true
 providerManaged:
     supportsPITR: false
     # The sidecar has one storage configuration per cluster.

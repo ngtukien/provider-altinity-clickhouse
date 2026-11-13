@@ -145,11 +145,26 @@ func (p *Provider) SyncRestore(c *controller.Context, restore *backupv1alpha1.Re
 			return controller.RestoreExecutionStatus{}, fmt.Errorf("get Backup: %w", err)
 		}
 
-		if backup.Spec.Origin.Type == backupv1alpha1.BackupOriginTypeExternal {
-			return controller.RestoreExecutionStatus{
-				State:   backupv1alpha1.RestoreStateFailed,
-				Message: "restoring from external backup is not supported",
-			}, nil
+		// An imported Backup names its source in its path (see ImportBackups).
+		sourceNamespace, sourceInstallation, sourceBackup := "", "", remoteBackupName(backup)
+		if backup.Spec.Origin.InstanceRef != nil && backup.Spec.Origin.InstanceRef.Name != c.Name() {
+			sourceInstallation = backup.Spec.Origin.InstanceRef.Name
+		}
+		if external := backup.Spec.Origin.External; external != nil {
+			ns, installation, name, ok := importedSource(external.Path)
+			if !ok {
+				return controller.RestoreExecutionStatus{
+					State:   backupv1alpha1.RestoreStateFailed,
+					Message: fmt.Sprintf("Backup %q has an unknown path %q", backupName, external.Path),
+				}, nil
+			}
+			sourceBackup = name
+			if installation != c.Name() || ns != restore.Namespace {
+				sourceInstallation = installation
+			}
+			if ns != restore.Namespace {
+				sourceNamespace = ns
+			}
 		}
 
 		if backup.Status.State == backupv1alpha1.BackupStateFailed {
@@ -202,10 +217,9 @@ func (p *Provider) SyncRestore(c *controller.Context, restore *backupv1alpha1.Re
 			if chr.CreationTimestamp.IsZero() {
 				spec := chiv1.ClickHouseRestoreSpec{
 					ClickHouseInstallation: c.Name(),
-					BackupName:             remoteBackupName(backup),
-				}
-				if backup.Spec.Origin.InstanceRef != nil && backup.Spec.Origin.InstanceRef.Name != c.Name() {
-					spec.SourceInstallation = backup.Spec.Origin.InstanceRef.Name
+					BackupName:             sourceBackup,
+					SourceInstallation:     sourceInstallation,
+					SourceNamespace:        sourceNamespace,
 				}
 				if params.Overwrite {
 					spec.Overwrite = types.NewStringBool(true)
