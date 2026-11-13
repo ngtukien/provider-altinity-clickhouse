@@ -116,11 +116,18 @@ extraEnv: []
 loadBalancer:
   enabled: false
 # -- Instance form with one Connectivity choice instead of the Security and Network sections: Internal (ClusterIP)
-# or External (LoadBalancer with loadBalancer.enabled, else NodePort). A hidden group sets TLS on (optional mode) and
-# externalPorts "tls", so outside the cluster only the secure ports are open. Only the form changes: every setting
-# stays available through the API.
+# or External (LoadBalancer with loadBalancer.enabled, else NodePort). Pair it with defaults.tls and
+# defaults.externalPorts for TLS (the form does not set them). Only the form changes: every setting stays available
+# through the API.
 form:
   connectivity: false
+# -- Platform defaults for Instances that leave a parameter unset; an Instance that sets it (API, preset) keeps its
+# own value. Changing a default later changes the Instances that rely on it (held for maintenance approval).
+defaults:
+  # -- "" (TLS off), "optional" (TLS on, plaintext ports kept) or "required" (secure ports only)
+  tls: ""
+  # -- "" or "all" (every port outside the cluster), or "tls" (only HTTPS 8443 and native TLS 9440)
+  externalPorts: ""
 # - name: MY_VAR
 #   value: "my-value"
 

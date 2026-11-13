@@ -12,7 +12,7 @@ metadata:
 {{- if or $lb $connectivity }}
 {{- range $topology, $ui := $spec.spec.uiSchema }}
 {{- if $connectivity }}
-{{- /* One Connectivity choice instead of Security + Network: TLS on, only the secure ports outside the cluster. */}}
+{{- /* One Connectivity choice instead of Security + Network; TLS and the external ports come from defaults.*. */}}
 {{- $_ := unset $ui.sections "security" }}
 {{- $_ := set $ui "sectionsOrder" (without $ui.sectionsOrder "security") }}
 {{- with $ui.sections.network }}
@@ -23,11 +23,6 @@ metadata:
 {{- $_ := set $exposure "defaultValue" "ClusterIP" }}
 {{- $_ := set $exposure "options" (list (dict "label" "Internal (in-cluster, plain or TLS)" "value" "ClusterIP") (dict "label" "External (outside the cluster, TLS only)" "value" (ternary "LoadBalancer" "NodePort" $lb))) }}
 {{- $_ := set $exposure "helperText" (ternary "External: its own address, HTTPS 8443 and native TLS 9440, limited to the allowed IPs. Fixed after creation." "External: by name (HTTPS 443, native TLS 9440) or on <node IP>:<node port> for 8443/9440; see the connection details. Fixed after creation." $lb) }}
-{{- /* Hidden fields: not shown, their default goes into the Instance. */}}
-{{- $_ := set .components "tlsEnabled" (dict "uiType" "hidden" "path" "spec.components.engine.parameters.tls.enabled" "fieldParams" (dict "defaultValue" "enabled")) }}
-{{- $_ := set .components "tlsMode" (dict "uiType" "hidden" "path" "spec.components.engine.parameters.tls.mode" "fieldParams" (dict "defaultValue" "optional")) }}
-{{- $_ := set .components "externalPorts" (dict "uiType" "hidden" "path" "spec.components.engine.parameters.externalPorts" "fieldParams" (dict "defaultValue" "tls")) }}
-{{- $_ := set . "componentsOrder" (concat .componentsOrder (list "tlsEnabled" "tlsMode" "externalPorts")) }}
 {{- if $lb }}
 {{- $_ := set .components "loadBalancerSourceRanges" (dict "uiType" "text" "path" "spec.components.engine.parameters.loadBalancerSourceRanges" "fieldParams" (dict "label" "Allowed IPs" "defaultValue" "0.0.0.0/0" "placeholder" "203.0.113.0/24, 198.51.100.7/32" "helperText" "External only: comma-separated CIDRs allowed to connect.")) }}
 {{- $_ := set . "componentsOrder" (append .componentsOrder "loadBalancerSourceRanges") }}

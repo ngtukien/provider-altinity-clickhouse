@@ -59,6 +59,10 @@ spec:
               value: {{ .Values.operatorAccess.namespace | default .Release.Namespace | quote }}
             - name: CLICKHOUSE_OPERATOR_POD_LABELS
               value: {{ .Values.operatorAccess.podLabels | default (printf "app.kubernetes.io/name=operator,app.kubernetes.io/instance=%s" .Release.Name) | quote }}
+            - name: CLICKHOUSE_DEFAULT_TLS_MODE
+              value: {{ .Values.defaults.tls | quote }}
+            - name: CLICKHOUSE_DEFAULT_EXTERNAL_PORTS
+              value: {{ .Values.defaults.externalPorts | quote }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

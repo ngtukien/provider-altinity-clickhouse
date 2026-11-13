@@ -156,7 +156,12 @@ func externalTLSOnly(c *controller.Context) bool {
 	}
 	var params components.ClickHouseParameters
 	_ = c.TryDecodeComponentParameters(c.Instance().Spec.Components[common.ComponentEngine], &params)
-	return params.ExternalPorts == common.ExternalPortsTLS
+	ports := params.ExternalPorts
+	if ports == "" {
+		// The platform's default (chart value defaults.externalPorts).
+		ports = os.Getenv(common.EnvDefaultExternalPorts)
+	}
+	return ports == common.ExternalPortsTLS
 }
 
 // exposureServiceName returns the Service that carries the exposure: the

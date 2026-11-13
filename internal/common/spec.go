@@ -275,6 +275,13 @@ const (
 	// through Ingresses of class EnvIngressClass; EnvIngressClusterIssuer
 	// issues their HTTPS certificates (see reconcileExternalAccess).
 	EnvExternalDomain       = "CLICKHOUSE_EXTERNAL_DOMAIN"
+
+	// EnvDefaultTLSMode and EnvDefaultExternalPorts are the platform's defaults
+	// for Instances that set no tls or externalPorts parameter (chart values
+	// defaults.tls and defaults.externalPorts): "optional" or "required" turns
+	// TLS on in that mode, "tls" opens only the secure ports outside the cluster.
+	EnvDefaultTLSMode       = "CLICKHOUSE_DEFAULT_TLS_MODE"
+	EnvDefaultExternalPorts = "CLICKHOUSE_DEFAULT_EXTERNAL_PORTS"
 	EnvIngressClass         = "CLICKHOUSE_INGRESS_CLASS"
 	EnvIngressClusterIssuer = "CLICKHOUSE_INGRESS_CLUSTER_ISSUER"
 

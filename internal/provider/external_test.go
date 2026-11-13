@@ -215,3 +215,26 @@ func TestExternalPortsTLS(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, found)
 }
+
+// The chart's defaults.tls and defaults.externalPorts apply to Instances that
+// leave the parameters unset; an Instance that sets them keeps its own values.
+func TestPlatformDefaults(t *testing.T) {
+	t.Setenv(common.EnvDefaultTLSMode, common.TLSModeOptional)
+	t.Setenv(common.EnvDefaultExternalPorts, common.ExternalPortsTLS)
+
+	c := newTestContext(t, exposedInstance("", corev1.ServiceTypeNodePort))
+	assert.True(t, tlsEnabled(c))
+	assert.Equal(t, common.TLSModeOptional, tlsMode(c))
+	assert.True(t, externalTLSOnly(c))
+
+	own := newTestContext(t, exposedInstance(`{"tls":{"enabled":"disabled"},"externalPorts":"all"}`, corev1.ServiceTypeNodePort))
+	assert.False(t, tlsEnabled(own), "an Instance's own tls wins")
+	assert.False(t, externalTLSOnly(own), "an Instance's own externalPorts wins")
+
+	internal := newTestContext(t, exposedInstance("", corev1.ServiceTypeClusterIP))
+	assert.False(t, externalTLSOnly(internal), "nothing to expose in the cluster")
+
+	t.Setenv(common.EnvDefaultTLSMode, "")
+	t.Setenv(common.EnvDefaultExternalPorts, "")
+	assert.False(t, tlsEnabled(newTestContext(t, exposedInstance("", corev1.ServiceTypeNodePort))), "no default: TLS off as before")
+}

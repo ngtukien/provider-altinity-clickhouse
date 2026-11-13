@@ -17,6 +17,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -57,10 +58,15 @@ const caDuration = 10 * 365 * 24 * time.Hour
 func tlsParameters(c *controller.Context) *components.TLSParameters {
 	engine := c.Instance().Spec.Components[common.ComponentEngine]
 	var params components.ClickHouseParameters
-	if !c.TryDecodeComponentParameters(engine, &params) {
-		return nil
+	_ = c.TryDecodeComponentParameters(engine, &params)
+	if params.TLS != nil {
+		return params.TLS
 	}
-	return params.TLS
+	// The platform's default for Instances that set no tls (chart value defaults.tls).
+	if mode := os.Getenv(common.EnvDefaultTLSMode); mode != "" {
+		return &components.TLSParameters{Enabled: common.TLSEnabled, Mode: mode}
+	}
+	return nil
 }
 
 // tlsEnabled reports whether TLS is requested for the engine component.
