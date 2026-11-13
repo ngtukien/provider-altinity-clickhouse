@@ -14,9 +14,10 @@ on:
         required: false
         default: "2.0.0-dev.4"
   pull_request:
+  # Branches reach main and release/* only through a pull request; tags are releases.
   push:
-    # The fork releases from release/* and fixes on fix/* and feat/*, never from main.
-    branches: [main, "release/**", "fix/**", "feat/**"]
+    branches: [main, "release/**"]
+    tags: ["v*"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
