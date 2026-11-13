@@ -232,6 +232,8 @@ helm_resource(
         # Every chart edit re-runs `helm upgrade`; the preflight hook would
         # run the live-update image as a one-off Job each time.
         '--set', 'upgradePreflight.enabled=false',
+        # k3d ships a load balancer (servicelb), so the LoadBalancer exposure is offered.
+        '--set', 'loadBalancer.enabled=true',
     ] + ([
         '--set', 'operator.operator.image.repository={0}'.format(os.getenv('OPERATOR_IMAGE_REPOSITORY')),
         '--set', 'operator.operator.image.tag={0}'.format(os.getenv('OPERATOR_IMAGE_TAG')),
