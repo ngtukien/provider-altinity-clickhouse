@@ -111,9 +111,16 @@ extraEnv: []
 
 # -- The platform has a load balancer (e.g. MetalLB): the Instance form offers the LoadBalancer exposure, each
 # Instance getting its own address on the standard ports, with an "Allowed IPs" field for its source ranges.
-# Leave false where Services of type LoadBalancer stay pending (the provider then rejects them).
+# Leave false where Services of type LoadBalancer stay pending. Only the form follows it: the provider accepts a
+# LoadBalancer set through the API either way.
 loadBalancer:
   enabled: false
+# -- Instance form with one Connectivity choice instead of the Security and Network sections: Internal (ClusterIP)
+# or External (LoadBalancer with loadBalancer.enabled, else NodePort). A hidden group sets TLS on (optional mode) and
+# externalPorts "tls", so outside the cluster only the secure ports are open. Only the form changes: every setting
+# stays available through the API.
+form:
+  connectivity: false
 # - name: MY_VAR
 #   value: "my-value"
 

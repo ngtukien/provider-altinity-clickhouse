@@ -69,6 +69,14 @@ spec:
                 Each entry maps to a server-level setting rendered into config.d,
                 e.g. `max_concurrent_queries: 200` or `logger/level: information`.
               type: string
+            externalPorts:
+              description: |-
+                ExternalPorts chooses the ports an Instance exposed through a NodePort or
+                LoadBalancer opens outside the cluster: "all" (default), or "tls", only the
+                secure ports (HTTPS 8443, native TLS 9440). With "tls" the client Service
+                stays in the cluster with every port, and a <name>-public Service carries
+                the exposure. Needs TLS enabled.
+              type: string
             loadBalancerSourceRanges:
               description: |-
                 LoadBalancerSourceRanges limits a LoadBalancer exposure to these client

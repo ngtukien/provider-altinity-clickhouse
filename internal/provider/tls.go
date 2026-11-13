@@ -289,7 +289,8 @@ func readCACert(c *controller.Context) string {
 // whose CHI it serves (the CHI and the Instance share the name).
 func instanceForClientService(_ context.Context, obj client.Object) []reconcile.Request {
 	chiName := obj.GetLabels()[common.LabelCHIName]
-	if chiName == "" || obj.GetLabels()[labelOperatorService] != operatorServiceCR || obj.GetName() != clientServiceName(chiName) {
+	client := obj.GetLabels()[labelOperatorService] == operatorServiceCR && obj.GetName() == clientServiceName(chiName)
+	if chiName == "" || !client && obj.GetName() != chiName+publicServiceSuffix {
 		return nil
 	}
 	return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: chiName}}}
@@ -338,7 +339,7 @@ func externalAddresses(c *controller.Context) (names, ips []string, err error) {
 		names = append(names, host)
 	}
 	svc := &corev1.Service{}
-	found, err := getOptional(c, svc, clientServiceName(c.Name()))
+	found, err := getOptional(c, svc, exposureServiceName(c))
 	if err != nil || !found || svc.Spec.Type != corev1.ServiceTypeLoadBalancer {
 		return names, nil, err
 	}

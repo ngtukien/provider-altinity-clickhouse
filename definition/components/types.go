@@ -61,6 +61,12 @@ type ClickHouseParameters struct {
 	// so the Instance form can edit them; empty lets anyone in. The platform
 	// offers the LoadBalancer exposure only where it has a load balancer.
 	LoadBalancerSourceRanges string `json:"loadBalancerSourceRanges,omitempty"`
+	// ExternalPorts chooses the ports an Instance exposed through a NodePort or
+	// LoadBalancer opens outside the cluster: "all" (default), or "tls", only the
+	// secure ports (HTTPS 8443, native TLS 9440). With "tls" the client Service
+	// stays in the cluster with every port, and a <name>-public Service carries
+	// the exposure. Needs TLS enabled.
+	ExternalPorts string `json:"externalPorts,omitempty"`
 }
 
 // QueryLimitsParameters configures the server memory budget and the settings
