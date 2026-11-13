@@ -49,7 +49,6 @@ spec:
       type: object
   supportedProviders:
     - altinity-clickhouse
-  supportsImport: true
   uiSchema:
     backup:
       components:
