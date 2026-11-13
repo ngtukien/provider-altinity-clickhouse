@@ -112,10 +112,6 @@ extraEnv: []
 # -- The platform has a load balancer (e.g. MetalLB): the Instance form offers the LoadBalancer exposure, each
 # Instance getting its own address on the standard ports, with an "Allowed IPs" field for its source ranges.
 # Leave false where Services of type LoadBalancer stay pending (the provider then rejects them).
-# -- Let Everest import the backups already in a BackupStorage (BackupImport) and restore them. Needs the backup
-# CRDs of OpenEverest after 2.0.0-dev.4 (BackupClass spec.supportsImport); with dev.4's the BackupClass is rejected.
-backupImport:
-  enabled: false
 loadBalancer:
   enabled: false
 # - name: MY_VAR
@@ -189,3 +185,8 @@ operator:
           namespaces:
             include:
               - ".*"
+
+# -- Let Everest import the backups already in a BackupStorage (BackupImport) and restore them. Needs the backup
+# CRDs of OpenEverest after 2.0.0-dev.4 (BackupClass spec.supportsImport); with dev.4's the BackupClass is rejected.
+backupImport:
+  enabled: false
