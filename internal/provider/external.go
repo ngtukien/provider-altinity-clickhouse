@@ -55,6 +55,7 @@ const (
 	externalHTTPSuffix    = "-http"
 	externalNativeSuffix  = "-native"
 	externalTLSSuffix     = "-external-tls"
+	publicServiceSuffix   = "-public"
 )
 
 // externalHost returns <name>.<domain>, or "" when the provider has no domain
@@ -89,11 +90,6 @@ func exposedService(c *controller.Context) *corev1alpha1.Service {
 	return out
 }
 
-// loadBalancerEnabled reports whether the platform offers the LoadBalancer exposure.
-func loadBalancerEnabled() bool {
-	return os.Getenv(common.EnvLoadBalancerEnabled) == "true"
-}
-
 // splitList returns the non-empty, trimmed items of a comma-separated list.
 func splitList(s string) []string {
 	var out []string
@@ -105,13 +101,14 @@ func splitList(s string) []string {
 	return out
 }
 
-// validateExposure rejects a LoadBalancer where the platform has none, which
-// would leave the Service pending, and malformed source ranges.
-func validateExposure(enginePath *field.Path, service *corev1alpha1.Service, sourceRanges string) field.ErrorList {
+// validateExposure rejects malformed source ranges and externalPorts. Which
+// exposures customers may pick is the form's business (chart value
+// loadBalancer.enabled), not the provider's.
+func validateExposure(enginePath *field.Path, sourceRanges, externalPorts string) field.ErrorList {
 	var errs field.ErrorList
-	if service != nil && service.ServiceType == corev1.ServiceTypeLoadBalancer && !loadBalancerEnabled() {
-		errs = append(errs, field.Forbidden(enginePath.Child("service", "serviceType"),
-			"this cluster has no load balancer; use NodePort to reach the Instance from outside the cluster"))
+	if externalPorts != "" && externalPorts != common.ExternalPortsAll && externalPorts != common.ExternalPortsTLS {
+		errs = append(errs, field.NotSupported(enginePath.Child("parameters", "externalPorts"), externalPorts,
+			[]string{common.ExternalPortsAll, common.ExternalPortsTLS}))
 	}
 	for _, cidr := range splitList(sourceRanges) {
 		prefix, err := netip.ParsePrefix(cidr)
@@ -141,8 +138,69 @@ func reconcileExternalAccess(c *controller.Context) error {
 		func() client.Object { return externalNativeIngress(c, host) }); err != nil {
 		return err
 	}
-	return reconcileObject(c, &corev1.Service{ObjectMeta: c.ObjectMeta(c.Name() + externalServiceSuffix)}, wantHTTP || wantNative,
-		func() client.Object { return externalService(c) })
+	if err := reconcileObject(c, &corev1.Service{ObjectMeta: c.ObjectMeta(c.Name() + externalServiceSuffix)}, wantHTTP || wantNative,
+		func() client.Object { return externalService(c) }); err != nil {
+		return err
+	}
+	return reconcileObject(c, &corev1.Service{ObjectMeta: c.ObjectMeta(c.Name() + publicServiceSuffix)}, externalTLSOnly(c),
+		func() client.Object { return publicService(c) })
+}
+
+// externalTLSOnly reports whether the Instance is exposed with externalPorts
+// "tls": the exposure then lives on the <name>-public Service, with the secure
+// ports only, and the client Service stays in the cluster.
+func externalTLSOnly(c *controller.Context) bool {
+	service := c.Instance().Spec.Components[common.ComponentEngine].Service
+	if service == nil || (service.ServiceType != corev1.ServiceTypeNodePort && service.ServiceType != corev1.ServiceTypeLoadBalancer) {
+		return false
+	}
+	var params components.ClickHouseParameters
+	_ = c.TryDecodeComponentParameters(c.Instance().Spec.Components[common.ComponentEngine], &params)
+	ports := params.ExternalPorts
+	if ports == "" {
+		// The platform's default (chart value defaults.externalPorts).
+		ports = os.Getenv(common.EnvDefaultExternalPorts)
+	}
+	// Without TLS there are no secure ports to expose: expose as before.
+	return ports == common.ExternalPortsTLS && tlsEnabled(c)
+}
+
+// exposureServiceName returns the Service that carries the exposure: the
+// client Service, or <name>-public with externalPorts "tls".
+func exposureServiceName(c *controller.Context) string {
+	if externalTLSOnly(c) {
+		return c.Name() + publicServiceSuffix
+	}
+	return clientServiceName(c.Name())
+}
+
+// publicService exposes the secure ports only, as the engine's Service asks
+// (NodePort, or LoadBalancer with its source ranges and annotations).
+func publicService(c *controller.Context) *corev1.Service {
+	service := exposedService(c)
+	svc := &corev1.Service{
+		ObjectMeta: c.ObjectMeta(c.Name() + publicServiceSuffix),
+		Spec: corev1.ServiceSpec{
+			Type:     service.ServiceType,
+			Selector: map[string]string{common.LabelCHIName: c.Name()},
+			Ports: []corev1.ServicePort{
+				{Name: "https", Protocol: corev1.ProtocolTCP, Port: common.HTTPSPort, TargetPort: intstr.FromInt32(common.HTTPSPort)},
+				{Name: "secureclient", Protocol: corev1.ProtocolTCP, Port: common.TCPSecurePort, TargetPort: intstr.FromInt32(common.TCPSecurePort)},
+			},
+		},
+	}
+	if svc.Labels == nil {
+		svc.Labels = map[string]string{}
+	}
+	// Lets the LoadBalancer watch map the Service back to its Instance.
+	svc.Labels[common.LabelCHIName] = c.Name()
+	if len(service.Annotations) > 0 {
+		svc.Annotations = service.Annotations
+	}
+	if service.ServiceType == corev1.ServiceTypeLoadBalancer && service.LoadBalancerService != nil {
+		svc.Spec.LoadBalancerSourceRanges = service.LoadBalancerService.SourceRanges.NormalizedSourceRanges()
+	}
+	return svc
 }
 
 // reconcileObject applies build() when wanted, and deletes obj otherwise.

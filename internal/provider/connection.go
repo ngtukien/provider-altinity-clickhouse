@@ -52,7 +52,7 @@ func buildConnectionDetails(c *controller.Context, chi *chiv1.ClickHouseInstalla
 
 	host := internalHost
 	svc := &corev1.Service{}
-	if found, err := getOptional(c, svc, clientServiceName(c.Name())); err == nil && found {
+	if found, err := getOptional(c, svc, exposureServiceName(c)); err == nil && found {
 		if address := loadBalancerAddress(svc); address != "" {
 			host = address
 		}

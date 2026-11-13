@@ -141,17 +141,14 @@ func TestConnectionDetailsUseExternalHost(t *testing.T) {
 
 func TestLoadBalancerExposure(t *testing.T) {
 	enginePath := field.NewPath("spec", "components").Key("engine")
-	lb := &corev1alpha1.Service{ServiceType: corev1.ServiceTypeLoadBalancer}
 
-	t.Setenv(common.EnvLoadBalancerEnabled, "false")
-	errs := validateExposure(enginePath, lb, "")
-	require.Len(t, errs, 1, "no load balancer on the platform")
-	assert.Equal(t, "spec.components[engine].service.serviceType", errs[0].Field)
-	assert.Empty(t, validateExposure(enginePath, &corev1alpha1.Service{ServiceType: corev1.ServiceTypeNodePort}, ""))
-
-	t.Setenv(common.EnvLoadBalancerEnabled, "true")
-	assert.Empty(t, validateExposure(enginePath, lb, "203.0.113.0/24, 198.51.100.7/32"))
-	assert.Len(t, validateExposure(enginePath, lb, "203.0.113.1/24,nope"), 2)
+	// Whether customers may pick a LoadBalancer is the form's business.
+	assert.Empty(t, validateExposure(enginePath, "", ""))
+	assert.Empty(t, validateExposure(enginePath, "203.0.113.0/24, 198.51.100.7/32", common.ExternalPortsTLS))
+	assert.Len(t, validateExposure(enginePath, "203.0.113.1/24,nope", ""), 2)
+	errs := validateExposure(enginePath, "", "plaintext")
+	require.Len(t, errs, 1)
+	assert.Equal(t, "spec.components[engine].parameters.externalPorts", errs[0].Field)
 
 	// The parameter becomes the Service's source ranges, unless the Service sets its own.
 	params := `{"loadBalancerSourceRanges":"203.0.113.0/24, 198.51.100.7/32"}`
@@ -169,4 +166,79 @@ func TestLoadBalancerExposure(t *testing.T) {
 	// Ignored by other exposures.
 	c = newTestContext(t, exposedInstance(params, corev1.ServiceTypeNodePort))
 	assert.Nil(t, exposedService(c).LoadBalancerService)
+}
+
+// With externalPorts "tls" the exposure moves to <name>-public with the secure
+// ports only; the client Service stays in the cluster with every port.
+func TestExternalPortsTLS(t *testing.T) {
+	params := `{"tls":{"enabled":"enabled","mode":"optional"},"externalPorts":"tls","loadBalancerSourceRanges":"203.0.113.0/24"}`
+	for _, serviceType := range []corev1.ServiceType{corev1.ServiceTypeNodePort, corev1.ServiceTypeLoadBalancer} {
+		t.Run(string(serviceType), func(t *testing.T) {
+			c := newTestContext(t, exposedInstance(params, serviceType), issuedCertificate())
+			require.True(t, externalTLSOnly(c))
+
+			chi, err := buildCHI(c, 2)
+			require.NoError(t, err)
+			tmpl := chi.Spec.Templates.ServiceTemplates[0].Spec
+			assert.Equal(t, corev1.ServiceTypeClusterIP, tmpl.Type, "the client Service stays in the cluster")
+			assert.Len(t, tmpl.Ports, 4, "plaintext and secure ports in the cluster")
+
+			require.NoError(t, reconcileExternalAccess(c))
+			public := &corev1.Service{}
+			require.NoError(t, c.Get(public, "db"+publicServiceSuffix))
+			assert.Equal(t, serviceType, public.Spec.Type)
+			var ports []int32
+			for _, p := range public.Spec.Ports {
+				ports = append(ports, p.Port)
+			}
+			assert.Equal(t, []int32{common.HTTPSPort, common.TCPSecurePort}, ports, "secure ports only outside")
+			if serviceType == corev1.ServiceTypeLoadBalancer {
+				assert.Equal(t, []string{"203.0.113.0/24"}, public.Spec.LoadBalancerSourceRanges)
+			}
+		})
+	}
+
+	// Connection details read the node ports from <name>-public.
+	public := publicService(newTestContext(t, exposedInstance(params, corev1.ServiceTypeNodePort)))
+	public.Spec.Ports[0].NodePort, public.Spec.Ports[1].NodePort = 31443, 32440
+	c := newTestContext(t, exposedInstance(params, corev1.ServiceTypeNodePort), issuedCertificate(), public)
+	details := buildConnectionDetails(c, completedCHI())
+	assert.Equal(t, "31443", details.AdditionalProperties[common.ConnectionKeyHTTPSPort+common.ConnectionKeyNodePortSuffix])
+	assert.Equal(t, "32440", details.AdditionalProperties[common.ConnectionKeyNativeSecurePort+common.ConnectionKeyNodePortSuffix])
+	assert.NotContains(t, details.AdditionalProperties, common.ConnectionKeyHTTPPort+common.ConnectionKeyNodePortSuffix)
+
+	// Default "all": as before, the client Service itself is exposed and no -public Service.
+	c = newTestContext(t, exposedInstance(`{"tls":{"enabled":"enabled","mode":"optional"}}`, corev1.ServiceTypeNodePort), issuedCertificate())
+	assert.False(t, externalTLSOnly(c))
+	require.NoError(t, reconcileExternalAccess(c))
+	found, err := getOptional(c, &corev1.Service{}, "db"+publicServiceSuffix)
+	require.NoError(t, err)
+	assert.False(t, found)
+}
+
+// The chart's defaults.tls and defaults.externalPorts apply to Instances that
+// leave the parameters unset; an Instance that sets them keeps its own values.
+func TestPlatformDefaults(t *testing.T) {
+	t.Setenv(common.EnvDefaultTLSMode, common.TLSModeOptional)
+	t.Setenv(common.EnvDefaultExternalPorts, common.ExternalPortsTLS)
+
+	c := newTestContext(t, exposedInstance("", corev1.ServiceTypeNodePort))
+	assert.True(t, tlsEnabled(c))
+	assert.Equal(t, common.TLSModeOptional, tlsMode(c))
+	assert.True(t, externalTLSOnly(c))
+
+	own := newTestContext(t, exposedInstance(`{"tls":{"enabled":"disabled"},"externalPorts":"all"}`, corev1.ServiceTypeNodePort))
+	assert.False(t, tlsEnabled(own), "an Instance's own tls wins")
+	assert.False(t, externalTLSOnly(own), "an Instance's own externalPorts wins")
+
+	// TLS turned off by the Instance: the default externalPorts cannot apply.
+	plain := newTestContext(t, exposedInstance(`{"tls":{"enabled":"disabled"}}`, corev1.ServiceTypeNodePort))
+	assert.False(t, externalTLSOnly(plain), "no secure ports without TLS")
+
+	internal := newTestContext(t, exposedInstance("", corev1.ServiceTypeClusterIP))
+	assert.False(t, externalTLSOnly(internal), "nothing to expose in the cluster")
+
+	t.Setenv(common.EnvDefaultTLSMode, "")
+	t.Setenv(common.EnvDefaultExternalPorts, "")
+	assert.False(t, tlsEnabled(newTestContext(t, exposedInstance("", corev1.ServiceTypeNodePort))), "no default: TLS off as before")
 }

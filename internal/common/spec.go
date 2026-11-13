@@ -139,6 +139,11 @@ const (
 	// TLSModeOptional adds the secure ports alongside the plaintext ones.
 	TLSModeOptional = "optional"
 
+	// ExternalPortsAll (default) exposes every client port outside the cluster;
+	// ExternalPortsTLS only the secure ones, on a separate <name>-public Service.
+	ExternalPortsAll = "all"
+	ExternalPortsTLS = "tls"
+
 	// AppUserName is the application user provisioned by the provider. The
 	// Altinity operator does not create a usable external user, so we create one.
 	AppUserName = "admin"
@@ -270,12 +275,15 @@ const (
 	// through Ingresses of class EnvIngressClass; EnvIngressClusterIssuer
 	// issues their HTTPS certificates (see reconcileExternalAccess).
 	EnvExternalDomain       = "CLICKHOUSE_EXTERNAL_DOMAIN"
+
+	// EnvDefaultTLSMode and EnvDefaultExternalPorts are the platform's defaults
+	// for Instances that set no tls or externalPorts parameter (chart values
+	// defaults.tls and defaults.externalPorts): "optional" or "required" turns
+	// TLS on in that mode, "tls" opens only the secure ports outside the cluster.
+	EnvDefaultTLSMode       = "CLICKHOUSE_DEFAULT_TLS_MODE"
+	EnvDefaultExternalPorts = "CLICKHOUSE_DEFAULT_EXTERNAL_PORTS"
 	EnvIngressClass         = "CLICKHOUSE_INGRESS_CLASS"
 	EnvIngressClusterIssuer = "CLICKHOUSE_INGRESS_CLUSTER_ISSUER"
-
-	// EnvLoadBalancerEnabled is "true" where the cluster has a load balancer
-	// (e.g. MetalLB): only then is the LoadBalancer exposure accepted.
-	EnvLoadBalancerEnabled = "CLICKHOUSE_LOAD_BALANCER_ENABLED"
 
 	// DefaultOperatorPodLabels selects the operator the chart bundles.
 	DefaultOperatorPodLabels = "app.kubernetes.io/name=operator"
