@@ -185,7 +185,8 @@ local_resource(
 # the subchart is present in charts/ before Tilt installs the release.
 local_resource(
     'provider-chart-deps',
-    'helm dependency update {0}'.format(chart_dir),
+    # A subchart already in charts/ (CI packages the operator fork's) is kept.
+    'ls {0}/charts/*.tgz >/dev/null 2>&1 || helm dependency update {0}'.format(chart_dir),
     deps=['{0}/Chart.yaml'.format(chart_dir)],
     labels=['provider'],
 )
@@ -231,7 +232,10 @@ helm_resource(
         # Every chart edit re-runs `helm upgrade`; the preflight hook would
         # run the live-update image as a one-off Job each time.
         '--set', 'upgradePreflight.enabled=false',
-    ],
+    ] + ([
+        '--set', 'operator.operator.image.repository={0}'.format(os.getenv('OPERATOR_IMAGE_REPOSITORY')),
+        '--set', 'operator.operator.image.tag={0}'.format(os.getenv('OPERATOR_IMAGE_TAG')),
+    ] if os.getenv('OPERATOR_IMAGE_REPOSITORY', '') else []),
     image_deps=[provider_image],
     image_keys=[('image.repository', 'image.tag')],
     resource_deps=provider_resource_deps,

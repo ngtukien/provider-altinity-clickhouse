@@ -15,7 +15,8 @@ on:
         default: "2.0.0-dev.4"
   pull_request:
   push:
-    branches: [main]
+    # The fork releases from release/* and fixes on fix/* and feat/*, never from main.
+    branches: [main, "release/**", "fix/**", "feat/**"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -26,6 +27,7 @@ permissions:
 
 env:
   OPENEVEREST_VERSION: ${{ github.event.inputs.openeverest_version || '2.0.0-dev.4' }}
+  OPERATOR_FORK_TAG: 0.28.0-dbaas.1
 
 jobs:
   cases:
@@ -117,10 +119,22 @@ jobs:
             done'
           kubectl delete pod dnscheck --wait=false
 
+      # The chart depends on altinity-clickhouse-operator 0.28.0, which Altinity has not
+      # published yet: package it from the operator fork the lab runs.
+      - name: Operator chart from the fork
+        run: |
+          git clone --depth 1 --branch "$OPERATOR_FORK_TAG" https://github.com/ngtukien/clickhouse-operator.git /tmp/operator
+          helm package /tmp/operator/deploy/helm/clickhouse-operator -d charts/provider-altinity-clickhouse/charts
+          ls charts/provider-altinity-clickhouse/charts
+
       - name: Bring up OpenEverest core + provider (tilt ci)
         run: tilt ci -f dev/Tiltfile
         env:
           INSTALL_OPENEVEREST: "true"
+          # The fork's image fixes the backup managers' cache with watch-all namespaces
+          # (Altinity #2117), which the backup and schedule cases need.
+          OPERATOR_IMAGE_REPOSITORY: ghcr.io/ngtukien/clickhouse-operator
+          OPERATOR_IMAGE_TAG: ${{ env.OPERATOR_FORK_TAG }}
 
       - name: Run integration case (chainsaw)
         run: make test-integration INTEGRATION_CASES=test/integration/cases/${{ matrix.case }}
