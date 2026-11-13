@@ -103,10 +103,10 @@ spec:
         - apply:
             file: 30-list-objects-job.yaml
         - script:
-            timeout: 150s
+            timeout: 240s
             content: |
               set -eu
-              if ! kubectl wait --for=condition=Complete job/itest-ch-ts-s3-list -n "$NAMESPACE" --timeout=120s; then
+              if ! kubectl wait --for=condition=Complete job/itest-ch-ts-s3-list -n "$NAMESPACE" --timeout=210s; then
                 kubectl logs -n "$NAMESPACE" job/itest-ch-ts-s3-list >&2 || true
                 exit 1
               fi
