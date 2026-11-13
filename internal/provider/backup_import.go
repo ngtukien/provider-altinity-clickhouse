@@ -69,9 +69,11 @@ func (p *Provider) ImportBackups(ctx context.Context, imp *backupv1alpha1.Backup
 	}
 
 	var objects []storedObject
+	// Only the import's own namespace: a bucket shared between tenants must not
+	// hand one tenant another's backups.
 	pages := s3.NewListObjectsV2Paginator(s3Client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(storage.Spec.S3.Bucket),
-		Prefix: aws.String(importPrefix),
+		Prefix: aws.String(importPrefix + imp.Namespace + "/"),
 	})
 	for pages.HasMorePages() {
 		page, err := pages.NextPage(ctx)
@@ -94,13 +96,14 @@ func (p *Provider) ImportBackups(ctx context.Context, imp *backupv1alpha1.Backup
 // importedBackups turns the metadata.json objects of a storage listing into
 // External Backups, one per backup across its shards: the path leaves the
 // shard out, and the times are the first and last shard's metadata upload.
+// Backups of other namespaces are left out.
 func importedBackups(imp *backupv1alpha1.BackupImport, objects []storedObject) []*backupv1alpha1.Backup {
 	type span struct{ first, last time.Time }
 	spans := map[string]*span{}
 	for _, obj := range objects {
 		parts := strings.Split(strings.TrimPrefix(obj.Key, importPrefix), "/")
 		// namespace, installation, cluster, shard, backup, metadata.json
-		if len(parts) != 6 || parts[5] != importMetadata || slicesHasEmpty(parts) {
+		if len(parts) != 6 || parts[5] != importMetadata || slicesHasEmpty(parts) || parts[0] != imp.Namespace {
 			continue
 		}
 		path := importPrefix + strings.Join([]string{parts[0], parts[1], parts[2], parts[4]}, "/")

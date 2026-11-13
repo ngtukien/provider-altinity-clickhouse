@@ -29,7 +29,7 @@ import (
 
 func TestImportedBackups(t *testing.T) {
 	imp := &backupv1alpha1.BackupImport{
-		ObjectMeta: metav1.ObjectMeta{Name: "imp", Namespace: "ns"},
+		ObjectMeta: metav1.ObjectMeta{Name: "imp", Namespace: "ch"},
 		Spec: backupv1alpha1.BackupImportSpec{
 			ClassRef:   commonv1alpha1.ObjectRef{Name: "altinity-clickhouse-backup"},
 			StorageRef: commonv1alpha1.ObjectRef{Name: "lab-s3"},
@@ -47,6 +47,8 @@ func TestImportedBackups(t *testing.T) {
 		{Key: "backup/ch/sharded/clickhouse/0/half/shadow/x", LastModified: t0},
 		{Key: "ch/sharded/cold/abc", LastModified: t0},
 		{Key: "backup/ch//clickhouse/0/x/metadata.json", LastModified: t0},
+		// Another namespace's backup in a shared bucket: never imported.
+		{Key: "backup/other-tenant/db/clickhouse/0/secret/metadata.json", LastModified: t0},
 	}
 
 	backups := importedBackups(imp, objects)
