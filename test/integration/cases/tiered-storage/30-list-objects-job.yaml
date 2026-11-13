@@ -47,9 +47,16 @@ spec:
             - -c
             - |
               # Cold data lives under <namespace>/<instance>/cold/ (see coldEndpoint).
-              n=$(aws --endpoint-url http://itest-ch-ts-s3:9000 s3 ls --recursive s3://clickhouse-cold/default/itest-ch-ts/cold/ | wc -l)
-              echo "objects under default/itest-ch-ts/cold/: $n"
-              [ "$n" -gt 0 ]
+              # Retried: on a busy CI runner the store's Service is sometimes unreachable for a while.
+              for i in 1 2 3 4 5 6 7 8 9 10; do
+                if out=$(aws --endpoint-url http://itest-ch-ts-s3:9000 s3 ls --recursive s3://clickhouse-cold/default/itest-ch-ts/cold/); then
+                  n=$(printf '%s' "$out" | grep -c . || true)
+                  echo "objects under default/itest-ch-ts/cold/: $n"
+                  [ "$n" -gt 0 ] && exit 0
+                fi
+                echo "attempt $i: no listing yet"; sleep 10
+              done
+              exit 1
           resources:
             requests:
               cpu: 50m
