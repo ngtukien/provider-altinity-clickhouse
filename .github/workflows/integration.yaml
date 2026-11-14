@@ -28,7 +28,7 @@ permissions:
 
 env:
   OPENEVEREST_VERSION: ${{ github.event.inputs.openeverest_version || '2.0.0-dev.4' }}
-  OPERATOR_FORK_TAG: 0.28.0-dbaas.1
+  OPERATOR_FORK_TAG: 0.28.0-service.1
 
 jobs:
   cases:
