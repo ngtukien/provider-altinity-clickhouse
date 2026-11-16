@@ -411,7 +411,7 @@ spec:
               uiType: number
               validation:
                 celExpressions:
-                  - celExpr: double(spec.components.engine.replicas) >= 2.0 || double(spec.topology.parameters.numShards) >= 2.0
+                  - celExpr: spec.components.engine.replicas >= 2 || spec.topology.parameters.numShards >= 2
                     message: A single shard needs at least 2 replicas
                 int: true
                 min: 1
@@ -421,7 +421,6 @@ spec:
                 defaultValue: 1
                 helperText: Spread the data over the shards with a Distributed table.
                 label: Shards
-                placeholder: "1"
                 step: 1
               path: spec.topology.parameters.numShards
               uiType: number
@@ -431,7 +430,7 @@ spec:
                 modes:
                   edit:
                     celExpressions:
-                      - celExpr: '!has(original.spec.topology.parameters) || !has(original.spec.topology.parameters.numShards) || double(spec.topology.parameters.numShards) >= double(original.spec.topology.parameters.numShards)'
+                      - celExpr: spec.topology.parameters.numShards >= original.spec.topology.parameters.numShards
                         message: Shards cannot be removed
                 required: true
           componentsOrder:
