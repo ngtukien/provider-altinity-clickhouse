@@ -54,7 +54,7 @@ ui:
                 modes:
                   edit:
                     celExpressions:
-                      - celExpr: "spec.topology.parameters.shards >= original.spec.topology.parameters.shards"
+                      - celExpr: "double(spec.topology.parameters.shards) >= double(original.spec.topology.parameters.shards)"
                         message: "Shards cannot be decreased"
             replicas:
               uiType: number
@@ -89,8 +89,11 @@ ui:
                 label: "CPU"
                 defaultValue: 2
                 step: 1
+              # Whole cores: the API takes a CPU quantity as a whole number or
+              # a string, so a fractional number is rejected.
               validation:
                 required: true
+                int: true
                 min: 1
             memory:
               uiType: number
@@ -119,7 +122,7 @@ ui:
                 modes:
                   edit:
                     celExpressions:
-                      - celExpr: "spec.components.engine.storage.size >= original.spec.components.engine.storage.size"
+                      - celExpr: "double(spec.components.engine.storage.size) >= double(original.spec.components.engine.storage.size)"
                         message: "Disk size cannot be decreased"
           componentsOrder:
             - cpu

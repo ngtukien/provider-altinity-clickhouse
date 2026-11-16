@@ -199,17 +199,25 @@ spec:
         components:
           password:
             fieldParams:
+              helperText: At least 12 characters.
               label: Password
               type: password
+            path: password
             uiType: text
             validation:
-              minLength: 12
+              min: 12
               required: true
           username:
             fieldParams:
+              helperText: Leave empty for "admin".
               label: Username
               placeholder: admin
+            path: username
             uiType: text
+            validation:
+              regex:
+                message: Start with a letter or underscore; use only letters, digits and underscores (at most 64)
+                pattern: ^[A-Za-z_][A-Za-z0-9_]{0,63}$
         componentsOrder:
           - username
           - password
@@ -294,6 +302,7 @@ spec:
                   path: spec.components.engine.resources.limits.cpu
                   uiType: number
                   validation:
+                    int: true
                     min: 1
                     required: true
                 disk:
@@ -310,7 +319,7 @@ spec:
                     modes:
                       edit:
                         celExpressions:
-                          - celExpr: spec.components.engine.storage.size >= original.spec.components.engine.storage.size
+                          - celExpr: double(spec.components.engine.storage.size) >= double(original.spec.components.engine.storage.size)
                             message: Disk size cannot be decreased
                     required: true
                 memory:
@@ -426,6 +435,7 @@ spec:
                   path: spec.components.engine.resources.limits.cpu
                   uiType: number
                   validation:
+                    int: true
                     min: 1
                     required: true
                 disk:
@@ -442,7 +452,7 @@ spec:
                     modes:
                       edit:
                         celExpressions:
-                          - celExpr: spec.components.engine.storage.size >= original.spec.components.engine.storage.size
+                          - celExpr: double(spec.components.engine.storage.size) >= double(original.spec.components.engine.storage.size)
                             message: Disk size cannot be decreased
                     required: true
                 memory:
@@ -496,7 +506,7 @@ spec:
                     modes:
                       edit:
                         celExpressions:
-                          - celExpr: spec.topology.parameters.shards >= original.spec.topology.parameters.shards
+                          - celExpr: double(spec.topology.parameters.shards) >= double(original.spec.topology.parameters.shards)
                             message: Shards cannot be decreased
                     required: true
               componentsOrder:
@@ -582,6 +592,7 @@ spec:
                   path: spec.components.engine.resources.limits.cpu
                   uiType: number
                   validation:
+                    int: true
                     min: 1
                     required: true
                 disk:
@@ -598,7 +609,7 @@ spec:
                     modes:
                       edit:
                         celExpressions:
-                          - celExpr: spec.components.engine.storage.size >= original.spec.components.engine.storage.size
+                          - celExpr: double(spec.components.engine.storage.size) >= double(original.spec.components.engine.storage.size)
                             message: Disk size cannot be decreased
                     required: true
                 memory:
